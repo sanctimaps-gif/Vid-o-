@@ -1,0 +1,34 @@
+{
+  "name": "vid-o",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Genere des Shorts YouTube prets a poster a partir d'un site web et d'une consigne en langage naturel.",
+  "bin": {
+    "vido": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx src/cli.ts",
+    "serve": "tsx src/cli.ts serve",
+    "doctor": "tsx src/cli.ts doctor",
+    "start": "node dist/cli.js serve",
+    "smoke": "tsx scripts/smoke-render.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.124.0",
+    "cheerio": "^1.2.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.5.0",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3"
+  }
+}

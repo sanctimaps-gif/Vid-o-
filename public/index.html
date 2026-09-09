@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vid-O — Shorts YouTube depuis votre site</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>"
+    />
+  </head>
+  <body>
+    <header class="masthead">
+      <div class="wordmark">Vid<span>-O</span></div>
+      <p class="tagline">
+        Donnez l'adresse de votre site et une consigne. Vous récupérez des Shorts verticaux prêts à
+        être publiés, titres et descriptions compris.
+      </p>
+    </header>
+
+    <main>
+      <form id="form" class="card">
+        <div class="field">
+          <label for="url">Adresse de votre site</label>
+          <input
+            id="url"
+            name="url"
+            type="url"
+            required
+            placeholder="https://ma-boutique.fr"
+            autocomplete="url"
+          />
+        </div>
+
+        <div class="field">
+          <label for="brief">Votre consigne</label>
+          <textarea
+            id="brief"
+            name="brief"
+            rows="3"
+            required
+            placeholder="Fais découvrir à l'auditeur les 5 meilleures tenues du magasin, une vidéo par tenue."
+          ></textarea>
+          <p class="hint">
+            Le nombre de vidéos est déduit de votre consigne. Utilisez le champ ci-dessous pour le
+            forcer.
+          </p>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label for="count">Nombre de vidéos</label>
+            <input id="count" name="count" type="number" min="1" max="8" placeholder="auto" />
+          </div>
+          <div class="field">
+            <label for="tts">Voix off</label>
+            <select id="tts" name="tts">
+              <option value="">Par défaut</option>
+              <option value="edge">edge-tts (gratuite)</option>
+              <option value="elevenlabs">ElevenLabs</option>
+              <option value="none">Sans voix</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="voice">Voix</label>
+            <input id="voice" name="voice" type="text" placeholder="fr-FR-DeniseNeural" />
+          </div>
+        </div>
+
+        <button id="submit" type="submit">Générer mes Shorts</button>
+        <p id="warning" class="warning" hidden></p>
+      </form>
+
+      <section id="progress" class="card" hidden>
+        <div class="progress-head">
+          <span class="spinner" aria-hidden="true"></span>
+          <h2 id="progress-title">Génération en cours…</h2>
+        </div>
+        <ol id="log" class="log"></ol>
+      </section>
+
+      <section id="results" hidden>
+        <h2 class="results-title">Vos vidéos</h2>
+        <div id="grid" class="grid"></div>
+      </section>
+    </main>
+
+    <footer>
+      <p>
+        Les fichiers sont écrits dans <code id="outdir">./out</code>. Le fichier
+        <code>A-POSTER.md</code> de chaque campagne regroupe titres, descriptions et mots-clés.
+      </p>
+    </footer>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
