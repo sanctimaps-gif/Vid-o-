@@ -123,6 +123,7 @@ function bestFromSrcset(srcset: string): string | null {
 }
 
 interface PageExtract {
+  lang: string;
   title: string;
   description: string;
   siteName: string;
@@ -154,6 +155,7 @@ function extractPage(html: string, pageUrl: string): PageExtract {
   const description =
     meta('meta[property="og:description"]') || meta('meta[name="description"]') || "";
   const siteName = meta('meta[property="og:site_name"]');
+  const lang = ($("html").attr("lang") ?? "").trim().toLowerCase();
 
   const imageUrls: Array<{ url: string; alt: string }> = [];
   const pushImage = (raw: string | undefined, alt: string): void => {
@@ -195,7 +197,7 @@ function extractPage(html: string, pageUrl: string): PageExtract {
     $(".price, .product-price, [class*=price]").first().text().trim().slice(0, 40) ||
     undefined;
 
-  return { title, description, siteName, text, imageUrls, links, jsonLd, price };
+  return { lang, title, description, siteName, text, imageUrls, links, jsonLd, price };
 }
 
 /* ------------------------------------------------------------------ *
@@ -430,6 +432,7 @@ export async function crawlSite(startUrl: string, options: CrawlOptions = {}): P
     origin,
     domain: start.hostname.replace(/^www\./, ""),
     siteName: homeExtract.siteName || homeExtract.title || start.hostname,
+    lang: homeExtract.lang,
     title: homeExtract.title,
     description: homeExtract.description,
     pageText: truncate(homeExtract.text, 6000),

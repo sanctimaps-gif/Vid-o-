@@ -68,6 +68,14 @@
           </div>
         </div>
 
+        <div class="field">
+          <label for="writer">Rédacteur des scripts</label>
+          <select id="writer" name="writer">
+            <option value="">Automatique</option>
+          </select>
+          <p class="hint" id="writer-hint">Tous les rédacteurs proposés sont gratuits.</p>
+        </div>
+
         <button id="submit" type="submit">Générer mes Shorts</button>
         <p id="warning" class="warning" hidden></p>
       </form>
@@ -91,6 +99,7 @@
         Les fichiers sont écrits dans <code id="outdir">./out</code>. Le fichier
         <code>A-POSTER.md</code> de chaque campagne regroupe titres, descriptions et mots-clés.
       </p>
+      <p>Vid-O fonctionne sans aucun abonnement : rendu local, voix off gratuite, rédacteur gratuit.</p>
     </footer>
 
     <script type="module" src="/app.js"></script>

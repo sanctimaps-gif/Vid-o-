@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import { config } from "./config.js";
 import { jobs } from "./jobs.js";
+import { selectWriter, writerStatus } from "./ai/writer.js";
 import { log } from "./util/log.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -16,12 +17,15 @@ export function createServer(outDir: string): express.Express {
   app.use("/files", express.static(path.resolve(outDir)));
 
   app.get("/api/config", (_request, response) => {
-    response.json({
-      hasApiKey: Boolean(config.anthropicApiKey || process.env.ANTHROPIC_AUTH_TOKEN),
-      model: config.model,
-      tts: config.tts,
-      outDir: path.resolve(outDir),
-    });
+    void (async () => {
+      const [writers, active] = await Promise.all([writerStatus(), selectWriter()]);
+      response.json({
+        writers,
+        activeWriter: { id: active.id, name: active.name, free: active.free },
+        tts: config.tts,
+        outDir: path.resolve(outDir),
+      });
+    })();
   });
 
   app.post("/api/generate", (request, response) => {
@@ -49,6 +53,7 @@ export function createServer(outDir: string): express.Express {
       outDir,
       tts: body.tts === "none" || body.tts === "elevenlabs" || body.tts === "edge" ? body.tts : undefined,
       voice: typeof body.voice === "string" && body.voice ? body.voice : undefined,
+      writer: typeof body.writer === "string" && body.writer ? body.writer : undefined,
     });
 
     response.status(202).json({ id: job.id });

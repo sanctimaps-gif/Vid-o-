@@ -53,6 +53,13 @@ function int(value: string | undefined, fallback: number): number {
 export type TtsProvider = "edge" | "elevenlabs" | "none";
 
 export const config = {
+  /** Rédacteur des scripts. "auto" retient le premier fournisseur gratuit disponible. */
+  writer: process.env.VIDO_WRITER || "auto",
+  ollamaUrl: process.env.OLLAMA_HOST || "http://127.0.0.1:11434",
+  ollamaModel: process.env.VIDO_OLLAMA_MODEL || "llama3.1:8b",
+  /** Serveur compatible OpenAI arbitraire (llama.cpp, LM Studio, vLLM...). */
+  llmBaseUrl: process.env.VIDO_LLM_BASE_URL || "",
+
   model: process.env.VIDO_MODEL || "claude-opus-5",
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
 

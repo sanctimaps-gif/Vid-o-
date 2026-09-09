@@ -18,16 +18,29 @@ const STEP_LABELS = {
   error: "erreur",
 };
 
+const writerSelect = document.querySelector("#writer");
+const writerHint = document.querySelector("#writer-hint");
+
 fetch("/api/config")
   .then((response) => response.json())
   .then((config) => {
     document.querySelector("#outdir").textContent = config.outDir;
-    if (!config.hasApiKey) {
-      warning.hidden = false;
-      warning.textContent =
-        "ANTHROPIC_API_KEY n'est pas défini côté serveur : la rédaction des scripts échouera. " +
-        "Renseignez la clé dans le fichier .env puis relancez le serveur.";
+
+    const auto = writerSelect.querySelector("option");
+    auto.textContent = `Automatique — ${config.activeWriter.name}`;
+
+    for (const writer of config.writers) {
+      // On ne propose que ce qui est réellement utilisable sur cette machine.
+      if (!writer.ready) continue;
+      const option = document.createElement("option");
+      option.value = writer.id;
+      option.textContent = writer.name;
+      writerSelect.append(option);
     }
+
+    writerHint.textContent = config.activeWriter.free
+      ? "Aucun de ces rédacteurs n'est facturé. Le rédacteur intégré fonctionne même sans connexion."
+      : "Attention : le rédacteur retenu est facturé à l'usage.";
   })
   .catch(() => {
     /* l'interface reste utilisable même si la config n'est pas lisible */
@@ -169,6 +182,7 @@ form.addEventListener("submit", async (event) => {
         count: data.get("count") || undefined,
         tts: data.get("tts") || undefined,
         voice: data.get("voice") || undefined,
+        writer: data.get("writer") || undefined,
       }),
     });
 

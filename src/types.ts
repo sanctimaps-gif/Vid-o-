@@ -30,6 +30,8 @@ export interface SiteSnapshot {
   origin: string;
   domain: string;
   siteName: string;
+  /** Code langue déclaré par la page, sert au rédacteur hors ligne. */
+  lang: string;
   title: string;
   description: string;
   /** Texte lisible de la page d'accueil, tronqué. */
@@ -114,5 +116,7 @@ export interface GenerateOptions {
   musicDir?: string;
   /** Plan déjà écrit (JSON), pour re-rendre sans repasser par le modèle. */
   planPath?: string;
+  /** Rédacteur à utiliser : auto, template, ollama, groq, gemini, openrouter, mistral, custom, anthropic. */
+  writer?: string;
   onProgress?: (step: string, detail?: string) => void;
 }

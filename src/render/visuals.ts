@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { VIDEO } from "../config.js";
 import { ffmpeg, hasFilter } from "./ffmpeg.js";
 
@@ -106,4 +109,86 @@ export async function buildScrim(outPath: string): Promise<void> {
     "1",
     outPath,
   ]);
+}
+
+/* ------------------------------------------------------------------ *
+ * Couleur de marque déduite d'une image
+ * ------------------------------------------------------------------ */
+
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  const [rn, gn, bn] = [r / 255, g / 255, b / 255];
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const lightness = (max + min) / 2;
+  if (max === min) return [0, 0, lightness];
+
+  const delta = max - min;
+  const saturation = lightness > 0.5 ? delta / (2 - max - min) : delta / (max + min);
+  let hue: number;
+  if (max === rn) hue = ((gn - bn) / delta + (gn < bn ? 6 : 0)) / 6;
+  else if (max === gn) hue = ((bn - rn) / delta + 2) / 6;
+  else hue = ((rn - gn) / delta + 4) / 6;
+  return [hue, saturation, lightness];
+}
+
+function hslToHex(h: number, s: number, l: number): string {
+  const chroma = (1 - Math.abs(2 * l - 1)) * s;
+  const x = chroma * (1 - Math.abs(((h * 6) % 2) - 1));
+  const m = l - chroma / 2;
+  const sector = Math.floor(h * 6) % 6;
+  const table: Array<[number, number, number]> = [
+    [chroma, x, 0],
+    [x, chroma, 0],
+    [0, chroma, x],
+    [0, x, chroma],
+    [x, 0, chroma],
+    [chroma, 0, x],
+  ];
+  const [r, g, b] = table[sector] ?? [chroma, x, 0];
+  return `#${[r, g, b]
+    .map((channel) => Math.round((channel + m) * 255).toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
+/**
+ * Couleur d'accent tirée d'une image : on réduit l'image à 8x8 puis on garde
+ * la teinte la plus franche, ramenée à une saturation et une clarté lisibles sur fond sombre.
+ */
+export async function dominantColor(imagePath: string): Promise<string | null> {
+  const rawPath = path.join(await fs.mkdtemp(path.join(os.tmpdir(), "vido-color-")), "px.raw");
+  try {
+    await ffmpeg([
+      "-i",
+      imagePath,
+      "-vf",
+      "scale=8:8:flags=area",
+      "-pix_fmt",
+      "rgb24",
+      "-f",
+      "rawvideo",
+      "-frames:v",
+      "1",
+      rawPath,
+    ]);
+    const pixels = await fs.readFile(rawPath);
+
+    let best: { hue: number; saturation: number } | null = null;
+    for (let offset = 0; offset + 2 < pixels.length; offset += 3) {
+      const [hue, saturation, lightness] = rgbToHsl(
+        pixels[offset]!,
+        pixels[offset + 1]!,
+        pixels[offset + 2]!,
+      );
+      // Les zones presque blanches ou presque noires ne disent rien de la marque.
+      if (lightness < 0.12 || lightness > 0.92) continue;
+      if (!best || saturation > best.saturation) best = { hue, saturation };
+    }
+
+    if (!best || best.saturation < 0.12) return null;
+    return hslToHex(best.hue, Math.min(0.85, Math.max(0.62, best.saturation)), 0.56);
+  } catch {
+    return null;
+  } finally {
+    await fs.rm(path.dirname(rawPath), { recursive: true, force: true });
+  }
 }

@@ -5,6 +5,7 @@ import { config } from "./config.js";
 import { generateCampaign } from "./pipeline.js";
 import { startServer } from "./server.js";
 import { edgeTtsAvailable } from "./tts/index.js";
+import { writerStatus } from "./ai/writer.js";
 import { ffmpegVersion, hasFilter } from "./render/ffmpeg.js";
 import { log } from "./util/log.js";
 
@@ -63,6 +64,9 @@ Options de génération
   --voice <nom>      Voix à utiliser, par exemple fr-FR-HenriNeural
   --music <dossier>  Dossier de musiques de fond
   --plan <fichier>   Réutilise un plan.json déjà généré (aucun appel au modèle)
+  --writer <nom>     Rédacteur des scripts : auto (défaut), template, ollama,
+                     groq, gemini, openrouter, mistral, custom, anthropic.
+                     Tous sont gratuits sauf anthropic.
 
 Exemple
   vido "https://ma-boutique.fr" "fais découvrir les 5 meilleures tenues du magasin, une vidéo par tenue"
@@ -93,6 +97,7 @@ async function commandGenerate(args: Args): Promise<void> {
     voice: args.flags.get("voice"),
     musicDir: args.flags.get("music"),
     planPath: args.flags.get("plan"),
+    writer: args.flags.get("writer"),
     onProgress: (step, detail) => {
       if (step === "done-video") return;
       log.step(`${step.padEnd(7)} ${detail ?? ""}`.trimEnd());
@@ -111,7 +116,9 @@ async function commandGenerate(args: Args): Promise<void> {
 }
 
 async function commandDoctor(): Promise<void> {
-  const checks: Array<[string, boolean, string]> = [];
+  // `blocker` empêche toute génération ; `warning` dégrade seulement le résultat.
+  type Check = [name: string, ok: boolean, detail: string, level?: "blocker" | "warning"];
+  const checks: Check[] = [];
 
   try {
     checks.push(["FFmpeg", true, await ffmpegVersion()]);
@@ -121,6 +128,7 @@ async function commandDoctor(): Promise<void> {
         `  filtre ${filter}`,
         present,
         present ? "disponible" : "absent (le rendu bascule sur une solution de repli)",
+        "warning",
       ]);
     }
   } catch (error) {
@@ -138,15 +146,22 @@ async function commandDoctor(): Promise<void> {
     config.fontRegular ?? "aucune police trouvée — définissez VIDO_FONT_REGULAR",
   ]);
 
-  const hasKey = Boolean(config.anthropicApiKey || process.env.ANTHROPIC_AUTH_TOKEN);
-  checks.push(["Clé Anthropic", hasKey, hasKey ? `définie (modèle ${config.model})` : "ANTHROPIC_API_KEY manquante"]);
-
   if (config.tts === "edge") {
     const edge = await edgeTtsAvailable();
-    checks.push(["edge-tts", edge, edge ? `installé (voix ${config.edgeVoice})` : "absent — `pipx install edge-tts`"]);
+    checks.push([
+      "edge-tts",
+      edge,
+      edge ? `installé (voix ${config.edgeVoice})` : "absent — `pipx install edge-tts` (sinon vidéos muettes)",
+      "warning",
+    ]);
   } else if (config.tts === "elevenlabs") {
     const ready = Boolean(config.elevenLabsApiKey && config.elevenLabsVoiceId);
-    checks.push(["ElevenLabs", ready, ready ? "configuré" : "ELEVENLABS_API_KEY / VIDO_ELEVENLABS_VOICE_ID manquants"]);
+    checks.push([
+      "ElevenLabs",
+      ready,
+      ready ? "configuré" : "ELEVENLABS_API_KEY / VIDO_ELEVENLABS_VOICE_ID manquants",
+      "warning",
+    ]);
   } else {
     checks.push(["Voix off", true, "désactivée (VIDO_TTS=none)"]);
   }
@@ -170,12 +185,23 @@ async function commandDoctor(): Promise<void> {
     const mark = ok ? "✓" : "✗";
     console.log(`${mark} ${name.padEnd(18)} ${detail}`);
   }
+
+  console.log("\nRédacteurs de scripts");
+  for (const row of await writerStatus()) {
+    console.log(`${row.ready ? "✓" : "·"} ${row.name.padEnd(34)} ${row.detail}`);
+  }
   console.log("");
 
-  const blocking = checks.filter(([name, ok]) => !ok && !name.startsWith("  filtre"));
+  const blocking = checks.filter(([, ok, , level]) => !ok && level !== "warning");
+  const warnings = checks.filter(([, ok, , level]) => !ok && level === "warning");
+
   if (blocking.length > 0) {
-    log.warn(`${blocking.length} point(s) à corriger avant de générer une campagne.`);
+    log.error(`${blocking.length} point(s) bloquant(s) : la génération échouera en l'état.`);
     process.exitCode = 1;
+    return;
+  }
+  if (warnings.length > 0) {
+    log.warn(`Prêt à générer. ${warnings.length} point(s) facultatif(s) amélioreraient le résultat.`);
   } else {
     log.success("Tout est prêt.");
   }

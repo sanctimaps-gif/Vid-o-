@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "./config.js";
-import { writeCampaignPlan } from "./ai/plan.js";
+import { selectWriter, writeCampaignPlan } from "./ai/writer.js";
 import { crawlSite, downloadImages } from "./scrape/site.js";
 import { renderVideo } from "./render/renderShort.js";
 import { createSpeaker } from "./tts/index.js";
@@ -70,8 +70,10 @@ export async function generateCampaign(options: GenerateOptions): Promise<Campai
     progress("script", `réutilisation du plan ${options.planPath}`);
     plan = CampaignPlanSchema.parse(JSON.parse(await fs.readFile(options.planPath, "utf8")));
   } else {
-    progress("script", "rédaction des scripts par Claude");
+    const writer = await selectWriter(options.writer as never);
+    progress("script", `rédacteur : ${writer.name}${writer.free ? "" : " — facturé à l'usage"}`);
     plan = await writeCampaignPlan({
+      writer,
       site,
       brief: options.brief,
       count: options.count,
