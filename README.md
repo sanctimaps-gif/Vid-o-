@@ -9,6 +9,9 @@ fait sur votre machine avec FFmpeg, la voix off passe par edge-tts, et les scrip
 un rédacteur intégré qui fonctionne hors ligne. Les rédacteurs plus fins sont eux aussi gratuits —
 Ollama en local, ou le palier gratuit de Groq, Google AI Studio, OpenRouter ou Mistral.
 
+**Essayez sans rien installer :** [sanctimaps-gif.github.io/Vid-o-](https://sanctimaps-gif.github.io/Vid-o-/)
+fabrique les vidéos directement dans votre navigateur, y compris sur téléphone.
+
 ```
 vido "https://ma-boutique.fr" "fais découvrir à l'auditeur les 5 meilleures tenues du magasin, une vidéo par tenue"
 ```
@@ -159,6 +162,21 @@ npm run smoke
 Fabrique une vidéo de démonstration à partir d'images générées localement. Ni site distant, ni
 appel à un modèle : c'est le moyen le plus rapide de valider votre installation FFmpeg et vos
 polices.
+
+## Les deux versions
+
+| | Navigateur ([la page](https://sanctimaps-gif.github.io/Vid-o-/)) | Ordinateur (ce dépôt) |
+| --- | --- | --- |
+| Installation | aucune | Node.js + FFmpeg |
+| Lecture du site | via un relais public quand le site refuse l'accès direct | directe |
+| Voix off | non : un navigateur ne sait pas enregistrer une voix de synthèse dans un fichier | oui, automatique |
+| Musique de fond | un fichier de votre appareil | dossier `assets/music/` |
+| Sortie | MP4 ou WebM selon le navigateur | MP4 H.264/AAC |
+| Rédacteur | intégré | intégré, Ollama, paliers gratuits, Claude |
+
+Le code de la page navigateur est dans `web/` et `index.html` ; celui de la version ordinateur
+dans `src/`. Ce sont deux moteurs de rendu différents — canvas d'un côté, FFmpeg de l'autre — qui
+suivent la même charte visuelle.
 
 ## Ce que Vid-O ne fait pas
 

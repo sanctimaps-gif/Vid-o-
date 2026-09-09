@@ -251,6 +251,10 @@ function requestedCount(brief: string, fallback: number): number {
   for (const [word, value] of Object.entries(written)) {
     if (new RegExp(`\\b${word}\\b\\s*(?:vid[ée]os?|shorts?|clips?)`, "i").test(brief)) return value;
   }
+
+  // « les 5 meilleures tenues » : un nombre isolé dans la consigne vaut aussi demande.
+  const loose = /\b([1-8])\b/.exec(brief);
+  if (loose?.[1]) return Number.parseInt(loose[1], 10);
   return fallback;
 }
 

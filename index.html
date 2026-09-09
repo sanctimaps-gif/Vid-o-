@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vid-O — vos Shorts YouTube depuis votre site</title>
+    <meta
+      name="description"
+      content="Donnez l'adresse de votre site et une consigne : Vid-O fabrique des Shorts verticaux prêts à publier. Gratuit, sans compte, directement dans le navigateur."
+    />
+    <link rel="stylesheet" href="web/styles.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>"
+    />
+  </head>
+  <body>
+    <header class="masthead">
+      <div class="wordmark">Vid<span>-O</span></div>
+      <p class="tagline">
+        L'adresse de votre site, une consigne, et vous repartez avec des Shorts verticaux prêts à
+        publier — titre et description compris.
+      </p>
+      <p class="badge">Gratuit · sans compte · tout se passe sur votre appareil</p>
+    </header>
+
+    <main>
+      <form id="form" class="card">
+        <div class="field">
+          <label for="url">Adresse de votre site</label>
+          <input
+            id="url"
+            name="url"
+            type="url"
+            required
+            inputmode="url"
+            autocomplete="url"
+            placeholder="https://ma-boutique.fr"
+          />
+        </div>
+
+        <div class="field">
+          <label for="brief">Votre consigne</label>
+          <textarea
+            id="brief"
+            name="brief"
+            rows="3"
+            required
+            placeholder="Fais découvrir à l'auditeur les 5 meilleures tenues du magasin, une vidéo par tenue."
+          ></textarea>
+          <p class="hint">Le nombre de vidéos est déduit de votre phrase.</p>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label for="count">Nombre de vidéos</label>
+            <input id="count" name="count" type="number" min="1" max="8" placeholder="auto" />
+          </div>
+          <div class="field">
+            <label for="size">Définition</label>
+            <select id="size" name="size">
+              <option value="1080x1920">1080 × 1920 (recommandé)</option>
+              <option value="720x1280">720 × 1280 (appareil lent)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="music">Musique de fond (facultatif)</label>
+          <input id="music" name="music" type="file" accept="audio/*" />
+          <p class="hint" id="music-label">
+            Un fichier de votre appareil, dont vous détenez les droits.
+          </p>
+        </div>
+
+        <button id="submit" type="submit">Générer mes Shorts</button>
+        <p id="notice" class="notice" hidden></p>
+      </form>
+
+      <section id="panel" class="card" hidden>
+        <p id="status" class="status">Préparation…</p>
+        <div class="track"><div id="bar" class="bar"></div></div>
+        <div id="stage" class="stage" hidden>
+          <canvas id="canvas" width="1080" height="1920"></canvas>
+          <p class="hint">
+            La vidéo se fabrique en direct : laissez cet onglet affiché jusqu'à la fin.
+          </p>
+        </div>
+      </section>
+
+      <section id="results" hidden>
+        <h2>Vos vidéos</h2>
+        <div id="grid" class="grid"></div>
+      </section>
+
+      <section class="card explain">
+        <h2>Comment ça marche</h2>
+        <ol>
+          <li>
+            <strong>Lecture du site.</strong> Vid-O ouvre votre page, repère les fiches produit —
+            catalogue Shopify, données structurées, liens de boutique — et en tire les noms, les
+            prix, les descriptions et les photos.
+          </li>
+          <li>
+            <strong>Écriture.</strong> Les scripts sont composés à partir de ces seules données :
+            accroche, scènes, textes incrustés, titre et description YouTube. Aucun prix ni aucune
+            caractéristique n'est inventé.
+          </li>
+          <li>
+            <strong>Montage.</strong> Chaque scène est dessinée en 9:16 : la photo posée sur son
+            propre flou plein cadre, un léger zoom, les sous-titres, votre couleur de marque tirée
+            de vos visuels, une barre de progression. La vidéo est enregistrée par votre navigateur.
+          </li>
+        </ol>
+        <p class="small">
+          Votre navigateur n'a pas le droit de lire une page d'un autre domaine. Quand l'accès
+          direct échoue, Vid-O passe par un relais public (allorigins, corsproxy, codetabs) :
+          l'adresse que vous saisissez transite alors par ce service. Sur un site privé ou
+          protégé, préférez la version ordinateur ci-dessous, qui lit les sites directement.
+        </p>
+      </section>
+
+      <section class="card explain">
+        <h2>La version ordinateur</h2>
+        <p>
+          Cette page fait le montage complet, mais votre navigateur ne peut pas enregistrer une voix
+          de synthèse dans un fichier vidéo. La version ordinateur ajoute la
+          <strong>voix off automatique</strong>, l'export MP4 H.264, l'exploration de plus de pages
+          et le choix du rédacteur (dont un modèle local via Ollama).
+        </p>
+        <pre><code>git clone https://github.com/sanctimaps-gif/Vid-o-.git
+cd Vid-o-
+npm install
+npm run dev -- "https://ma-boutique.fr" "fais 5 vidéos sur les 5 meilleures tenues"</code></pre>
+        <p>
+          <a href="https://github.com/sanctimaps-gif/Vid-o-#readme">Documentation complète sur GitHub</a>
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <p>
+        Vid-O ne publie pas à votre place : les fichiers sont produits, la mise en ligne reste la
+        vôtre. Relisez toujours les scripts avant publication, ce sont vos allégations commerciales.
+      </p>
+    </footer>
+
+    <script type="module" src="web/app.js"></script>
+  </body>
+</html>
