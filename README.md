@@ -37,10 +37,11 @@ out/ma-boutique-fr-2026-09-091132/
    quelle photo du site illustre quelle scène, et n'a pas le droit d'inventer un prix ou une
    caractéristique produit qui ne figure pas dans les données extraites. Voir « Le rédacteur » plus
    bas pour choisir lequel.
-3. **Fabrication.** Chaque scène est montée en 1080x1920 : la photo produit posée sur son propre
-   flou plein cadre, un léger zoom, les sous-titres calés sur la voix off, votre couleur de marque,
-   une barre de progression. Voix off, musique et normalisation du son sont assemblées, puis le tout
-   est encodé en MP4 H.264/AAC.
+3. **Fabrication.** La vidéo s'ouvre sur votre page réelle, dans une fenêtre de navigateur qui
+   défile, puis enchaîne vos visuels plein cadre en 1080x1920 : léger zoom, sous-titres calés sur la
+   voix off, votre couleur de marque, une barre de progression, et votre nom de domaine affiché en
+   permanence. Voix off, musique et normalisation du son sont assemblées, puis le tout est encodé
+   en MP4 H.264/AAC.
 
 ## Installation
 
@@ -136,10 +137,15 @@ npm run doctor
 
 ## Musique de fond
 
-Déposez vos fichiers `.mp3` dans `assets/music/`. Vid-O en attribue un par vidéo, l'atténue
-automatiquement dès que la voix parle et le fait descendre en fin de vidéo. Sans fichier, les
-vidéos gardent la seule voix off. Aucune musique n'est fournie : n'utilisez que des pistes dont
-vous détenez les droits pour la publication.
+**Sur la page navigateur**, la musique est composée à la volée — nappe, arpège, basse, et
+percussions selon l'ambiance choisie (calme, élégante, énergique). Rien n'est téléchargé, donc
+aucune réclamation de droits n'est possible sur ce que vous publiez. Elle s'efface automatiquement
+sous chaque phrase de la voix off.
+
+**Sur la version ordinateur**, déposez vos fichiers `.mp3` dans `assets/music/`. Vid-O en attribue
+un par vidéo, l'atténue dès que la voix parle et le fait descendre en fin de vidéo. Sans fichier,
+les vidéos gardent la seule voix off. Aucune musique n'est fournie : n'utilisez que des pistes dont
+vous détenez les droits.
 
 ## Réglages
 
@@ -169,8 +175,9 @@ polices.
 | --- | --- | --- |
 | Installation | aucune | Node.js + FFmpeg |
 | Lecture du site | via un relais public quand le site refuse l'accès direct | directe |
-| Voix off | non : un navigateur ne sait pas enregistrer une voix de synthèse dans un fichier | oui, automatique |
-| Musique de fond | un fichier de votre appareil | dossier `assets/music/` |
+| Voix off | oui, par un service de synthèse gratuit ; sous-titres seuls s'il ne répond pas | oui, edge-tts, meilleure qualité |
+| Musique de fond | composée par Vid-O, sans droits à gérer | vos fichiers dans `assets/music/` |
+| Page du site à l'écran | capture réelle, sinon page reconstituée | visuels du site |
 | Sortie | MP4 ou WebM selon le navigateur | MP4 H.264/AAC |
 | Rédacteur | intégré | intégré, Ollama, paliers gratuits, Claude |
 
@@ -183,4 +190,7 @@ suivent la même charte visuelle.
 - Il ne publie pas à votre place : les fichiers sont produits, la mise en ligne reste manuelle.
 - Il n'invente pas d'images. S'il n'y a aucune photo exploitable sur le site, les scènes sont
   fabriquées sur un fond aux couleurs de la marque.
+- La capture de votre page passe par le service gratuit de WordPress. S'il ne répond pas, la
+  vidéo montre une page reconstituée avec vos vrais textes et visuels, dans la même fenêtre de
+  navigateur.
 - Relisez toujours les scripts avant publication : ce sont vos allégations commerciales.

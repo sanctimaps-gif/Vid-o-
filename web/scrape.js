@@ -58,8 +58,7 @@ const SOURCES = [
 const READER = { id: "lecteur", url: (u) => `https://r.jina.ai/${u}` };
 
 const PRODUCT_PATH = /\/(products?|produits?|shop|boutique|item|articles?|collections?\/[^/]+\/products)\//i;
-const IMAGE_EXTENSIONS = /\.(jpe?g|png|webp|avif)(\?|$)/i;
-const SKIP_IMAGE = /(sprite|icon|favicon|placeholder|pixel|badge|payment|paypal|visa|mastercard|flag|logo)/i;
+const SKIP_IMAGE = /(sprite|icon|favicon|placeholder|pixel|badge|payment|paypal|visa|mastercard|flag|\.svg|\.gif)/i;
 
 export class ReadFailure extends Error {
   constructor(message, reasons) {
@@ -83,11 +82,25 @@ async function attempt(source, url, { as, timeout }) {
   const response = await withTimeout(fetch(source.url(url), { redirect: "follow" }), timeout, source.id);
   if (!response.ok) throw new Error(`${source.id} : réponse ${response.status}`);
 
+  // Une image est décodée ici, à l'intérieur de la tentative : un relais qui répond
+  // une page d'erreur au lieu du fichier doit compter comme un échec, pour que le
+  // chemin suivant soit essayé. Décoder plus loin faisait perdre l'image en silence.
+  if (as === "image") {
+    const blob = await response.blob();
+    if (blob.size < 2000) throw new Error(`${source.id} : fichier trop petit`);
+    try {
+      return await createImageBitmap(blob);
+    } catch {
+      throw new Error(`${source.id} : ce n'est pas une image`);
+    }
+  }
+
   if (as === "blob") {
     const blob = await response.blob();
     if (blob.size < 512) throw new Error(`${source.id} : fichier vide`);
     return blob;
   }
+
   const payload = source.unwrap(await response.text());
   if (!payload || payload.length < 120) throw new Error(`${source.id} : contenu vide`);
   return payload;
@@ -106,7 +119,7 @@ export function resetTransport() {
 }
 
 /** Lance tous les chemins de front et garde le premier qui aboutit. */
-function race(sources, url, options) {
+function race(sources, url, options, sticky = true) {
   return new Promise((resolve, reject) => {
     const reasons = [];
     let pending = sources.length;
@@ -115,7 +128,9 @@ function race(sources, url, options) {
     for (const source of sources) {
       attempt(source, url, options).then(
         (payload) => {
-          preferred = source;
+          // Une requête de service tiers (la voix) ne doit pas imposer son chemin
+          // à la lecture du site, qui a ses propres contraintes.
+          if (sticky) preferred = source;
           resolve(payload);
         },
         (error) => {
@@ -132,8 +147,9 @@ function race(sources, url, options) {
  * Récupère une ressource distante. Le premier appel met les chemins en concurrence ;
  * les suivants réutilisent le gagnant, et ne relancent une course qu'en cas d'échec.
  */
-export async function fetchRemote(url, { as = "text", timeout = 20000 } = {}) {
-  const usable = SOURCES.filter((source) => as !== "blob" || source.binary);
+export async function fetchRemote(url, { as = "text", timeout = 20000, sticky = true } = {}) {
+  const wantsBytes = as === "blob" || as === "image";
+  const usable = SOURCES.filter((source) => !wantsBytes || source.binary);
 
   if (preferred && usable.includes(preferred)) {
     try {
@@ -142,7 +158,7 @@ export async function fetchRemote(url, { as = "text", timeout = 20000 } = {}) {
       /* le chemin habituel a lâché : on relance une course complète */
     }
   }
-  return race(usable, url, { as, timeout });
+  return race(usable, url, { as, timeout }, sticky);
 }
 
 /* ------------------------------------------------------------------ *
@@ -242,8 +258,9 @@ function extractPage(html, pageUrl) {
   const pushImage = (raw, alt) => {
     if (!raw) return;
     const resolved = absoluteUrl(raw, pageUrl);
+    // On accepte large : beaucoup de sites servent leurs visuels par un CDN, sans
+    // extension de fichier. Le décodage fera le tri, lui, sans se tromper.
     if (!resolved || SKIP_IMAGE.test(resolved)) return;
-    if (!IMAGE_EXTENSIONS.test(resolved) && !/\/cdn\/|\/image/i.test(resolved)) return;
     images.push({ url: resolved, alt: (alt || "").trim().slice(0, 160) });
   };
 
@@ -550,19 +567,44 @@ export async function crawlSite(startUrl, { maxPages = 6, onProgress } = {}) {
 /** Télécharge les visuels et les décode. Une image illisible est simplement écartée. */
 export async function loadImages(site, { limit = 10, onProgress } = {}) {
   let loaded = 0;
+  let tried = 0;
+
   for (const image of site.images) {
     if (loaded >= limit) break;
+    tried += 1;
     try {
-      const blob = await fetchRemote(image.url, { as: "blob", timeout: 20000 });
-      if (blob.size < 4000) continue;
-      const bitmap = await createImageBitmap(blob);
-      if (bitmap.width < 300 || bitmap.height < 300) continue;
+      const bitmap = await fetchRemote(image.url, { as: "image", timeout: 20000 });
+      // Les pictogrammes et les bandeaux très étirés ne font pas un bon fond.
+      const ratio = bitmap.width / bitmap.height;
+      if (bitmap.width < 300 || bitmap.height < 260 || ratio > 4 || ratio < 0.25) continue;
       image.bitmap = bitmap;
       loaded += 1;
-      onProgress?.(`image ${loaded}/${limit}`);
+      onProgress?.(`${loaded} visuel(s) sur ${tried} essayé(s)`);
     } catch {
-      /* visuel inaccessible : on passe au suivant */
+      /* visuel inaccessible ou illisible : on passe au suivant */
     }
   }
   return loaded;
+}
+
+/**
+ * Capture de la page réelle, par le service gratuit de WordPress.
+ * C'est un bonus : s'il ne répond pas, la vidéo se rabat sur une page reconstituée.
+ */
+export async function siteScreenshot(url, { width = 720, timeout = 25000 } = {}) {
+  const shot = `https://s.wordpress.com/mshots/v1/${encodeURIComponent(url)}?w=${width}`;
+  try {
+    const bitmap = await withTimeout(
+      fetch(shot).then(async (response) => {
+        if (!response.ok) throw new Error(`capture : réponse ${response.status}`);
+        return createImageBitmap(await response.blob());
+      }),
+      timeout,
+      "capture",
+    );
+    // Le service renvoie parfois une image d'attente presque vide : on la refuse.
+    return bitmap.width >= 320 && bitmap.height >= 320 ? bitmap : null;
+  } catch {
+    return null;
+  }
 }

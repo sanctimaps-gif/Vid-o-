@@ -65,13 +65,28 @@
           </div>
         </div>
 
-        <div class="field">
-          <label for="music">Musique de fond (facultatif)</label>
-          <input id="music" name="music" type="file" accept="audio/*" />
-          <p class="hint" id="music-label">
-            Un fichier de votre appareil, dont vous détenez les droits.
-          </p>
+        <div class="row">
+          <div class="field">
+            <label for="voice">Voix off</label>
+            <select id="voice" name="voice">
+              <option value="on">Oui, elle lit le script</option>
+              <option value="off">Non, sous-titres seuls</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="mood">Musique</label>
+            <select id="mood" name="mood">
+              <option value="">Choisie pour vous</option>
+              <option value="calme">Calme</option>
+              <option value="elegant">Élégante</option>
+              <option value="energique">Énergique</option>
+            </select>
+          </div>
         </div>
+        <p class="hint">
+          La musique est composée par Vid-O au moment du montage : elle n'appartient à personne
+          d'autre que vous, aucune réclamation de droits n'est possible sur YouTube.
+        </p>
 
         <button id="submit" type="submit">Générer mes Shorts</button>
         <p id="notice" class="notice" hidden></p>
@@ -108,9 +123,10 @@
             restaurant — Vid-O parle du site lui-même à partir de ses titres de section.
           </li>
           <li>
-            <strong>Montage.</strong> Chaque scène est dessinée en 9:16 : la photo posée sur son
-            propre flou plein cadre, un léger zoom, les sous-titres, votre couleur de marque tirée
-            de vos visuels, une barre de progression. La vidéo est enregistrée par votre navigateur.
+            <strong>Montage.</strong> La vidéo s'ouvre sur votre page réelle, dans une fenêtre de
+            navigateur qui défile, puis enchaîne vos visuels plein cadre. Voix off, musique,
+            sous-titres et votre couleur de marque — tirée de vos propres images — sont assemblés
+            et enregistrés par votre navigateur.
           </li>
         </ol>
         <p class="small">
@@ -126,10 +142,10 @@
       <section class="card explain">
         <h2>La version ordinateur</h2>
         <p>
-          Cette page fait le montage complet, mais votre navigateur ne peut pas enregistrer une voix
-          de synthèse dans un fichier vidéo. La version ordinateur ajoute la
-          <strong>voix off automatique</strong>, l'export MP4 H.264, l'exploration de plus de pages
-          et le choix du rédacteur (dont un modèle local via Ollama).
+          Cette page monte des vidéos complètes, voix off et musique comprises. La version
+          ordinateur va plus loin : export MP4 H.264 garanti, exploration de bien plus de pages,
+          voix neuronales de meilleure qualité, et choix du rédacteur des scripts — dont un modèle
+          qui tourne chez vous, via Ollama.
         </p>
         <pre><code>git clone https://github.com/sanctimaps-gif/Vid-o-.git
 cd Vid-o-

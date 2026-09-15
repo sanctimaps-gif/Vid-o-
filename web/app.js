@@ -1,6 +1,14 @@
-import { ReadFailure, crawlSite, loadImages, preferredSource, resetTransport } from "./scrape.js";
+import {
+  ReadFailure,
+  crawlSite,
+  loadImages,
+  preferredSource,
+  resetTransport,
+  siteScreenshot,
+} from "./scrape.js";
 import { writeCampaign, requestedCount } from "./writer.js";
 import { isSupported, renderVideo } from "./render.js";
+import { MOOD_NAMES, pickMood } from "./audio.js";
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -14,8 +22,6 @@ const statusLine = $("#status");
 const bar = $("#bar");
 const results = $("#results");
 const grid = $("#grid");
-
-let musicBuffer = null;
 
 function say(message, kind = "info") {
   statusLine.textContent = message;
@@ -34,27 +40,6 @@ if (!isSupported()) {
   );
   submit.disabled = true;
 }
-
-/* ------------------------------------------------------------------ *
- * Musique de fond, choisie dans les fichiers de l'appareil
- * ------------------------------------------------------------------ */
-
-$("#music").addEventListener("change", async (event) => {
-  const file = event.target.files?.[0];
-  if (!file) {
-    musicBuffer = null;
-    return;
-  }
-  try {
-    const audioContext = new (window.AudioContext ?? window.webkitAudioContext)();
-    musicBuffer = await audioContext.decodeAudioData(await file.arrayBuffer());
-    await audioContext.close();
-    $("#music-label").textContent = `${file.name} — ajoutée en fond sonore`;
-  } catch {
-    musicBuffer = null;
-    $("#music-label").textContent = "Fichier audio illisible, il sera ignoré.";
-  }
-});
 
 /* ------------------------------------------------------------------ *
  * Résultats
@@ -79,7 +64,9 @@ function addResult(video, file, index) {
 
   const meta = document.createElement("p");
   meta.className = "meta";
-  meta.textContent = `${index} — ${file.durationSeconds}s — ${canvas.width}×${canvas.height}`;
+  meta.textContent =
+    `${index} — ${file.durationSeconds}s — ${canvas.width}×${canvas.height} — ` +
+    (file.spoken ? "voix off + musique" : "musique et sous-titres");
 
   const description = document.createElement("pre");
   description.className = "desc";
@@ -204,10 +191,20 @@ form.addEventListener("submit", async (event) => {
     const via = preferredSource();
     say(`${plan.videos.length} vidéo(s) à monter pour ${plan.brandName}${via ? ` (lu via ${via})` : ""}.`);
 
+    // Capture de la vraie page : c'est elle qu'on voit à l'ouverture et à la fin.
+    say("Capture de la page…");
+    const screenshot = await siteScreenshot(site.url, { width: canvas.width >= 1080 ? 900 : 720 });
+
+    const audioContext = new (window.AudioContext ?? window.webkitAudioContext)();
+    if (audioContext.state === "suspended") await audioContext.resume();
+
+    const chosenMood = String(data.get("mood") ?? "");
+    const mood = MOOD_NAMES.includes(chosenMood) ? chosenMood : pickMood(plan.brandName);
+    const withVoice = data.get("voice") !== "off";
+
     stage.hidden = false;
     for (const [index, video] of plan.videos.entries()) {
       const position = index + 1;
-      say(`Montage ${position}/${plan.videos.length} — ${video.concept}`);
       const file = await renderVideo({
         video,
         plan,
@@ -215,7 +212,11 @@ form.addEventListener("submit", async (event) => {
         canvas,
         position,
         total: plan.videos.length,
-        music: musicBuffer,
+        audioContext,
+        withVoice,
+        mood,
+        screenshot,
+        onStage: (step) => say(`Vidéo ${position}/${plan.videos.length} — ${step}`),
         onProgress: (ratio) => {
           const overall = (index + ratio) / plan.videos.length;
           bar.style.width = `${Math.round(overall * 100)}%`;
@@ -223,6 +224,7 @@ form.addEventListener("submit", async (event) => {
       });
       addResult(video, file, position);
     }
+    await audioContext.close();
 
     bar.style.width = "100%";
     stage.hidden = true;
