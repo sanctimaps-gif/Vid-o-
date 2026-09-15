@@ -55,6 +55,15 @@ export function renderSiteBrief(site: SiteSnapshot): string {
     lines.push("");
   }
 
+  if (site.sections.length > 0) {
+    lines.push(`SECTIONS DE LA PAGE (${site.sections.length}) :`);
+    for (const section of site.sections.slice(0, 12)) {
+      lines.push(`- ${section.title}`);
+      if (section.text) lines.push(`  ${truncate(section.text, 240)}`);
+    }
+    lines.push("");
+  }
+
   const usable = site.images.filter((image) => image.localPath);
   lines.push(`BANQUE D'IMAGES UTILISABLES (${usable.length}) :`);
   for (const image of usable) {

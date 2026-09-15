@@ -17,6 +17,12 @@ export interface SiteImage {
   height?: number;
 }
 
+/** Un titre de la page et le texte qui le suit : la matière des vidéos sans fiche produit. */
+export interface SiteSection {
+  title: string;
+  text: string;
+}
+
 export interface SiteProduct {
   title: string;
   url: string;
@@ -37,6 +43,7 @@ export interface SiteSnapshot {
   /** Texte lisible de la page d'accueil, tronqué. */
   pageText: string;
   products: SiteProduct[];
+  sections: SiteSection[];
   images: SiteImage[];
   pagesVisited: string[];
 }

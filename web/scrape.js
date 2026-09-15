@@ -2,67 +2,152 @@
  * Lecture d'un site depuis le navigateur.
  *
  * Un navigateur n'a pas le droit de lire une page d'un autre domaine : c'est la règle
- * du « même origine ». On tente donc l'accès direct, puis on passe par un relais public
- * qui, lui, ajoute les en-têtes autorisant la lecture.
+ * du « même origine ». Vid-O tente donc plusieurs chemins *en parallèle* — accès direct
+ * et plusieurs relais publics — et garde le premier qui répond. Courir les relais l'un
+ * après l'autre condamnait toute la lecture dès qu'un seul était lent ou hors service.
  */
 
-// Accès direct : constante, pour que la mémorisation du transport puisse le reconnaître.
-const DIRECT = (url) => url;
+const encode = (url) => encodeURIComponent(url);
 
-const PROXIES = [
-  (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-  (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
-  (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+/**
+ * Chemins d'accès, du plus souhaitable au moins souhaitable.
+ * `unwrap` extrait le contenu réel : certains relais renvoient une enveloppe JSON.
+ * `binary: false` marque ceux qui ne savent pas transporter une image.
+ */
+const SOURCES = [
+  { id: "direct", url: (u) => u, unwrap: (text) => text, binary: true },
+  {
+    id: "allorigins",
+    url: (u) => `https://api.allorigins.win/raw?url=${encode(u)}`,
+    unwrap: (text) => text,
+    binary: true,
+  },
+  {
+    id: "corsproxy",
+    url: (u) => `https://corsproxy.io/?url=${encode(u)}`,
+    unwrap: (text) => text,
+    binary: true,
+  },
+  {
+    id: "codetabs",
+    url: (u) => `https://api.codetabs.com/v1/proxy/?quest=${encode(u)}`,
+    unwrap: (text) => text,
+    binary: true,
+  },
+  {
+    id: "cors.lol",
+    url: (u) => `https://api.cors.lol/?url=${encode(u)}`,
+    unwrap: (text) => text,
+    binary: true,
+  },
+  {
+    id: "allorigins-json",
+    url: (u) => `https://api.allorigins.win/get?url=${encode(u)}`,
+    unwrap: (text) => JSON.parse(text).contents,
+    binary: false,
+  },
+  {
+    id: "whateverorigin",
+    url: (u) => `https://whateverorigin.org/get?url=${encode(u)}`,
+    unwrap: (text) => JSON.parse(text).contents,
+    binary: false,
+  },
 ];
+
+/** Lecteur de dernier recours : il exécute le JavaScript du site et renvoie du Markdown. */
+const READER = { id: "lecteur", url: (u) => `https://r.jina.ai/${u}` };
 
 const PRODUCT_PATH = /\/(products?|produits?|shop|boutique|item|articles?|collections?\/[^/]+\/products)\//i;
 const IMAGE_EXTENSIONS = /\.(jpe?g|png|webp|avif)(\?|$)/i;
 const SKIP_IMAGE = /(sprite|icon|favicon|placeholder|pixel|badge|payment|paypal|visa|mastercard|flag|logo)/i;
 
-async function withTimeout(promise, ms, label) {
-  let timer;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${label} : délai dépassé`)), ms);
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
+export class ReadFailure extends Error {
+  constructor(message, reasons) {
+    super(message);
+    this.name = "ReadFailure";
+    this.reasons = reasons;
   }
 }
 
-// Une fois qu'un transport a fonctionné pour ce site, on le réutilise : sur mobile,
-// retenter l'accès direct puis chaque relais à chaque image coûte très cher.
+function withTimeout(promise, ms, label) {
+  let timer;
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} : délai dépassé`)), ms);
+    }),
+  ]);
+}
+
+async function attempt(source, url, { as, timeout }) {
+  const response = await withTimeout(fetch(source.url(url), { redirect: "follow" }), timeout, source.id);
+  if (!response.ok) throw new Error(`${source.id} : réponse ${response.status}`);
+
+  if (as === "blob") {
+    const blob = await response.blob();
+    if (blob.size < 512) throw new Error(`${source.id} : fichier vide`);
+    return blob;
+  }
+  const payload = source.unwrap(await response.text());
+  if (!payload || payload.length < 120) throw new Error(`${source.id} : contenu vide`);
+  return payload;
+}
+
+// Le chemin qui a fonctionné est mémorisé : sans cela, chaque image relancerait
+// une course complète, ce qui sature la connexion d'un téléphone.
 let preferred = null;
 
-/**
- * Récupère une ressource distante, en direct si possible, sinon via un relais.
- * `maxAttempts` limite le nombre de transports essayés, pour les requêtes exploratoires.
- */
-export async function fetchRemote(url, { as = "text", timeout = 20000, maxAttempts } = {}) {
-  const all = [DIRECT, ...PROXIES];
-  const ordered = preferred ? [preferred, ...all.filter((build) => build !== preferred)] : all;
-  const attempts = maxAttempts ? ordered.slice(0, maxAttempts) : ordered;
-  let lastError = null;
+export function preferredSource() {
+  return preferred?.id ?? null;
+}
 
-  for (const build of attempts) {
+export function resetTransport() {
+  preferred = null;
+}
+
+/** Lance tous les chemins de front et garde le premier qui aboutit. */
+function race(sources, url, options) {
+  return new Promise((resolve, reject) => {
+    const reasons = [];
+    let pending = sources.length;
+    if (pending === 0) reject(new ReadFailure("aucun chemin disponible", reasons));
+
+    for (const source of sources) {
+      attempt(source, url, options).then(
+        (payload) => {
+          preferred = source;
+          resolve(payload);
+        },
+        (error) => {
+          reasons.push(error.message);
+          pending -= 1;
+          if (pending === 0) reject(new ReadFailure("tous les chemins ont échoué", reasons));
+        },
+      );
+    }
+  });
+}
+
+/**
+ * Récupère une ressource distante. Le premier appel met les chemins en concurrence ;
+ * les suivants réutilisent le gagnant, et ne relancent une course qu'en cas d'échec.
+ */
+export async function fetchRemote(url, { as = "text", timeout = 20000 } = {}) {
+  const usable = SOURCES.filter((source) => as !== "blob" || source.binary);
+
+  if (preferred && usable.includes(preferred)) {
     try {
-      const response = await withTimeout(fetch(build(url), { redirect: "follow" }), timeout, "lecture");
-      if (!response.ok) {
-        lastError = new Error(`réponse ${response.status}`);
-        continue;
-      }
-      const payload = as === "blob" ? await response.blob() : await response.text();
-      preferred = build;
-      return payload;
-    } catch (error) {
-      lastError = error;
+      return await attempt(preferred, url, { as, timeout });
+    } catch {
+      /* le chemin habituel a lâché : on relance une course complète */
     }
   }
-  throw lastError ?? new Error("ressource inaccessible");
+  return race(usable, url, { as, timeout });
 }
+
+/* ------------------------------------------------------------------ *
+ * Extraction d'une page HTML
+ * ------------------------------------------------------------------ */
 
 function absoluteUrl(candidate, base) {
   try {
@@ -100,6 +185,37 @@ function priceFromOffers(offers) {
     }
   }
   return undefined;
+}
+
+/**
+ * Titres de la page et texte qui les suit.
+ * C'est la matière des vidéos quand le site n'a pas de fiches produit.
+ */
+function extractSections(doc) {
+  const sections = [];
+  const seen = new Set();
+
+  for (const heading of doc.querySelectorAll("h1, h2, h3")) {
+    const title = (heading.textContent ?? "").replace(/\s+/g, " ").trim();
+    const key = title.toLowerCase();
+    if (title.length < 4 || title.length > 90 || seen.has(key)) continue;
+
+    let text = "";
+    let node = heading.nextElementSibling;
+    let hops = 0;
+    while (node && hops < 4 && text.length < 260) {
+      if (/^H[1-3]$/.test(node.tagName)) break;
+      const chunk = (node.textContent ?? "").replace(/\s+/g, " ").trim();
+      if (chunk.length > 30) text = text ? `${text} ${chunk}` : chunk;
+      node = node.nextElementSibling;
+      hops += 1;
+    }
+
+    seen.add(key);
+    sections.push({ title, text: text.slice(0, 400) });
+    if (sections.length >= 12) break;
+  }
+  return sections;
 }
 
 function extractPage(html, pageUrl) {
@@ -150,7 +266,6 @@ function extractPage(html, pageUrl) {
   }
 
   const body = (doc.querySelector("main") ?? doc.body)?.textContent ?? "";
-  const text = body.replace(/\s+/g, " ").trim().slice(0, 4000);
 
   return {
     lang: (doc.documentElement.getAttribute("lang") ?? "").toLowerCase(),
@@ -160,16 +275,78 @@ function extractPage(html, pageUrl) {
     images,
     links,
     jsonLd,
-    text,
+    sections: extractSections(doc),
+    text: body.replace(/\s+/g, " ").trim().slice(0, 4000),
   };
 }
 
+/* ------------------------------------------------------------------ *
+ * Extraction depuis le Markdown du lecteur de secours
+ * ------------------------------------------------------------------ */
+
+function extractMarkdown(markdown, pageUrl) {
+  const title = /^Title:\s*(.+)$/m.exec(markdown)?.[1]?.trim() ?? "";
+  const body = markdown.replace(/^[\s\S]*?Markdown Content:\s*/m, "");
+
+  const images = [];
+  for (const match of body.matchAll(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)/g)) {
+    const resolved = absoluteUrl(match[2], pageUrl);
+    if (resolved && !SKIP_IMAGE.test(resolved)) images.push({ url: resolved, alt: match[1].trim() });
+  }
+
+  const links = [];
+  for (const match of body.matchAll(/(?<!!)\[[^\]]*\]\((https?:\/\/[^)\s]+)/g)) {
+    const resolved = absoluteUrl(match[1], pageUrl);
+    if (resolved) links.push(resolved);
+  }
+
+  const sections = [];
+  const lines = body.split("\n");
+  for (const [index, line] of lines.entries()) {
+    const heading = /^#{1,3}\s+(.{4,90})$/.exec(line.trim());
+    if (!heading) continue;
+    const text = lines
+      .slice(index + 1, index + 5)
+      .filter((next) => !next.trim().startsWith("#"))
+      .join(" ")
+      .replace(/[*_`>[\]()]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    sections.push({ title: heading[1].trim(), text: text.slice(0, 400) });
+    if (sections.length >= 12) break;
+  }
+
+  const text = body
+    .replace(/!?\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/[#*_`>|-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return {
+    lang: "",
+    siteName: "",
+    title,
+    description: text.slice(0, 200),
+    images,
+    links,
+    jsonLd: [],
+    sections,
+    text: text.slice(0, 4000),
+  };
+}
+
+/** Le site est-il exploitable en l'état, ou faut-il tenter le lecteur ? */
+function isThin(page) {
+  return page.images.length === 0 && page.sections.length === 0 && page.text.length < 400;
+}
+
+/* ------------------------------------------------------------------ *
+ * Catalogues des plateformes courantes
+ * ------------------------------------------------------------------ */
+
 async function tryShopify(origin, onProgress) {
   try {
-    const raw = await fetchRemote(`${origin}/products.json?limit=30`, {
-      timeout: 12000,
-      maxAttempts: 2,
-    });
+    const raw = await fetchRemote(`${origin}/products.json?limit=30`, { timeout: 12000 });
     const data = JSON.parse(raw);
     if (!Array.isArray(data.products) || data.products.length === 0) return [];
     onProgress?.(`catalogue Shopify détecté (${data.products.length} produits)`);
@@ -193,19 +370,92 @@ async function tryShopify(origin, onProgress) {
   }
 }
 
-/**
- * Explore le site et renvoie ce qui servira à écrire les scripts.
- * Sur mobile on limite volontairement le nombre de pages : chaque page passe par un relais.
- */
+async function tryWooCommerce(origin, onProgress) {
+  try {
+    const raw = await fetchRemote(`${origin}/wp-json/wc/store/products?per_page=30`, { timeout: 12000 });
+    const data = JSON.parse(raw);
+    if (!Array.isArray(data) || data.length === 0) return [];
+    onProgress?.(`catalogue WooCommerce détecté (${data.length} produits)`);
+
+    return data.map((item) => ({
+      title: String(item.name ?? "").trim(),
+      url: String(item.permalink ?? origin),
+      price: item.prices?.price
+        ? `${item.prices.price} ${item.prices.currency_code ?? ""}`.trim()
+        : undefined,
+      description: String(item.short_description ?? item.description ?? "")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 600),
+      images: (item.images ?? [])
+        .slice(0, 2)
+        .map((image) => ({ url: String(image.src ?? ""), alt: String(image.alt ?? item.name ?? "") }))
+        .filter((image) => image.url),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Exploration
+ * ------------------------------------------------------------------ */
+
 export async function crawlSite(startUrl, { maxPages = 6, onProgress } = {}) {
   const start = new URL(startUrl);
   const origin = start.origin;
 
   onProgress?.(`lecture de ${start.hostname}`);
-  const html = await fetchRemote(startUrl);
-  const home = extractPage(html, startUrl);
 
-  const rawProducts = await tryShopify(origin, onProgress);
+  let home;
+  let readVia;
+  try {
+    home = extractPage(await fetchRemote(startUrl), startUrl);
+    readVia = preferredSource();
+  } catch (error) {
+    // Aucun chemin HTML n'a abouti : le lecteur reste la dernière chance.
+    onProgress?.("accès direct refusé, tentative via le lecteur");
+    try {
+      home = extractMarkdown(await withTimeout(
+        fetch(READER.url(startUrl)).then((response) => {
+          if (!response.ok) throw new Error(`lecteur : réponse ${response.status}`);
+          return response.text();
+        }),
+        45000,
+        "lecteur",
+      ), startUrl);
+      readVia = READER.id;
+    } catch (readerError) {
+      throw new ReadFailure(`${start.hostname} n'a pas pu être lu depuis le navigateur.`, [
+        ...(error instanceof ReadFailure ? error.reasons : [String(error.message)]),
+        String(readerError.message),
+      ]);
+    }
+  }
+
+  // Une page qui ne livre presque rien est le plus souvent construite en JavaScript :
+  // le lecteur, lui, l'exécute avant de répondre.
+  if (isThin(home)) {
+    onProgress?.("page presque vide, relecture via le lecteur");
+    try {
+      const markdown = await withTimeout(
+        fetch(READER.url(startUrl)).then((response) => response.text()),
+        45000,
+        "lecteur",
+      );
+      const rendered = extractMarkdown(markdown, startUrl);
+      if (!isThin(rendered)) {
+        home = { ...rendered, lang: home.lang, siteName: home.siteName || rendered.siteName };
+        readVia = READER.id;
+      }
+    } catch {
+      /* le lecteur n'a rien donné : on garde ce qu'on a */
+    }
+  }
+
+  let rawProducts = await tryShopify(origin, onProgress);
+  if (rawProducts.length === 0) rawProducts = await tryWooCommerce(origin, onProgress);
 
   if (rawProducts.length < 4) {
     const candidates = [...new Set(home.links)]
@@ -222,8 +472,7 @@ export async function crawlSite(startUrl, { maxPages = 6, onProgress } = {}) {
     for (const [index, link] of candidates.entries()) {
       onProgress?.(`page ${index + 1}/${candidates.length}`);
       try {
-        const pageHtml = await fetchRemote(link, { timeout: 15000 });
-        const page = extractPage(pageHtml, link);
+        const page = extractPage(await fetchRemote(link, { timeout: 15000 }), link);
         const product = flattenJsonLd(page.jsonLd).find(
           (node) =>
             node["@type"] === "Product" ||
@@ -240,7 +489,7 @@ export async function crawlSite(startUrl, { maxPages = 6, onProgress } = {}) {
           images: page.images.slice(0, 2),
         });
       } catch {
-        /* page inaccessible : on continue */
+        /* page inaccessible : on continue avec les autres */
       }
     }
   }
@@ -291,8 +540,10 @@ export async function crawlSite(startUrl, { maxPages = 6, onProgress } = {}) {
     title: home.title,
     description: home.description,
     pageText: home.text,
+    sections: home.sections,
     products,
     images,
+    readVia,
   };
 }
 

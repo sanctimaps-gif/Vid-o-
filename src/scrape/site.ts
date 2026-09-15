@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import * as cheerio from "cheerio";
 import { config } from "../config.js";
-import type { SiteImage, SiteProduct, SiteSnapshot } from "../types.js";
+import type { SiteImage, SiteProduct, SiteSection, SiteSnapshot } from "../types.js";
 import { normalizeTypography, truncate } from "../util/text.js";
 import { probeImageSize } from "../render/ffmpeg.js";
 
@@ -124,6 +124,7 @@ function bestFromSrcset(srcset: string): string | null {
 
 interface PageExtract {
   lang: string;
+  sections: SiteSection[];
   title: string;
   description: string;
   siteName: string;
@@ -187,6 +188,30 @@ function extractPage(html: string, pageUrl: string): PageExtract {
     if (resolved) links.push(resolved);
   });
 
+  // Titres de la page et texte qui les suit : de quoi parler du site quand il n'a pas de catalogue.
+  const sections: SiteSection[] = [];
+  const seenHeadings = new Set<string>();
+  $("h1, h2, h3").each((_, element) => {
+    if (sections.length >= 12) return;
+    const heading = normalizeTypography($(element).text());
+    const key = heading.toLowerCase();
+    if (heading.length < 4 || heading.length > 90 || seenHeadings.has(key)) return;
+
+    let body = "";
+    let node = $(element).next();
+    let hops = 0;
+    while (node.length > 0 && hops < 4 && body.length < 260) {
+      if (/^h[1-3]$/i.test(node.prop("tagName") ?? "")) break;
+      const chunk = normalizeTypography(node.text());
+      if (chunk.length > 30) body = body ? `${body} ${chunk}` : chunk;
+      node = node.next();
+      hops += 1;
+    }
+
+    seenHeadings.add(key);
+    sections.push({ title: heading, text: body.slice(0, 400) });
+  });
+
   const text = normalizeTypography(
     $("main").text() || $("body").text() || "",
   ).replace(/\s{2,}/g, " ");
@@ -197,7 +222,7 @@ function extractPage(html: string, pageUrl: string): PageExtract {
     $(".price, .product-price, [class*=price]").first().text().trim().slice(0, 40) ||
     undefined;
 
-  return { lang, title, description, siteName, text, imageUrls, links, jsonLd, price };
+  return { lang, sections, title, description, siteName, text, imageUrls, links, jsonLd, price };
 }
 
 /* ------------------------------------------------------------------ *
@@ -437,6 +462,7 @@ export async function crawlSite(startUrl: string, options: CrawlOptions = {}): P
     description: homeExtract.description,
     pageText: truncate(homeExtract.text, 6000),
     products,
+    sections: homeExtract.sections,
     images,
     pagesVisited,
   };

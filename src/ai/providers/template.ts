@@ -21,6 +21,10 @@ interface Phrasebook {
   ctaTexts: string[];
   detailIntro: string[];
   listHook: (count: number, what: string) => string;
+  siteHooks: string[];
+  siteHookTexts: string[];
+  siteTitle: (brand: string) => string;
+  siteSeriesTitle: (position: number, total: number, topic: string, brand: string) => string;
   title: (product: string, brand: string) => string;
   description: (product: string, brand: string, url: string) => string;
   seriesTitle: (position: number, total: number, product: string) => string;
@@ -66,6 +70,16 @@ const PHRASES: Record<Lang, Phrasebook> = {
     ctaTexts: ["LE LIEN EST EN DESSOUS", "A VOIR SUR LE SITE", "C'EST PAR ICI", "LIEN EN DESCRIPTION"],
     detailIntro: ["A retenir", "En bref", "Ce qu'il faut savoir", "Le detail"],
     listHook: (count, what) => `On passe en revue ${count} ${what}, restez jusqu'a la fin.`,
+    siteHooks: [
+      "Prenez trente secondes, on vous montre ce qu'il y a ici.",
+      "Vous ne connaissez pas encore cet endroit. Ca vaut le detour.",
+      "Voila ce qu'on peut trouver sur ce site.",
+      "On vous fait faire le tour, restez jusqu'a la fin.",
+      "Il y a de quoi faire ici, on vous montre.",
+    ],
+    siteHookTexts: ["A DECOUVRIR", "LE TOUR DU PROPRIETAIRE", "CA SE PASSE ICI", "REGARDEZ CA", "TRENTE SECONDES"],
+    siteTitle: (brand) => `${brand}, en trente secondes #Shorts`,
+    siteSeriesTitle: (position, total, topic, brand) => `${position}/${total} — ${topic} | ${brand} #Shorts`,
     title: (product, brand) => `${product} — ${brand} #Shorts`,
     description: (product, brand, url) =>
       `${product}, a retrouver chez ${brand}.\n\nToute la selection est sur ${url}`,
@@ -110,6 +124,16 @@ const PHRASES: Record<Lang, Phrasebook> = {
     ctaTexts: ["LINK BELOW", "SEE IT ON THE SITE", "THIS WAY", "LINK IN DESCRIPTION"],
     detailIntro: ["Worth knowing", "In short", "What to know", "The detail"],
     listHook: (count, what) => `We are going through ${count} ${what}, stay until the end.`,
+    siteHooks: [
+      "Give us thirty seconds and we will show you around.",
+      "You do not know this place yet. It is worth a look.",
+      "Here is what you can find on this site.",
+      "We are taking you through it, stay until the end.",
+      "There is a lot here. Let us show you.",
+    ],
+    siteHookTexts: ["TAKE A LOOK", "THE FULL TOUR", "IT HAPPENS HERE", "LOOK AT THIS", "THIRTY SECONDS"],
+    siteTitle: (brand) => `${brand}, in thirty seconds #Shorts`,
+    siteSeriesTitle: (position, total, topic, brand) => `${position}/${total} — ${topic} | ${brand} #Shorts`,
     title: (product, brand) => `${product} — ${brand} #Shorts`,
     description: (product, brand, url) =>
       `${product}, available at ${brand}.\n\nFull selection on ${url}`,
@@ -155,6 +179,7 @@ function scenesForProduct(
   site: SiteSnapshot,
   book: Phrasebook,
   seed: number,
+  kind: "product" | "site" = "product",
 ): Scene[] {
   const images = product.imageIndexes.filter((index) =>
     site.images.some((image) => image.index === index && image.localPath),
@@ -163,8 +188,8 @@ function scenesForProduct(
 
   const scenes: Scene[] = [
     {
-      narration: pick(book.hooks, seed),
-      onScreenText: pick(book.hookTexts, seed),
+      narration: pick(kind === "site" ? book.siteHooks : book.hooks, seed),
+      onScreenText: pick(kind === "site" ? book.siteHookTexts : book.hookTexts, seed),
       imageIndex: image(0),
       role: "hook",
     },
@@ -258,6 +283,35 @@ function requestedCount(brief: string, fallback: number): number {
   return fallback;
 }
 
+/**
+ * Sujets de repli quand le site n'expose aucune fiche produit :
+ * d'abord ses titres de section, sinon la page prise dans son ensemble.
+ */
+function fallbackSubjects(site: SiteSnapshot, count: number): SiteProduct[] {
+  const usable = site.images.filter((image) => image.localPath).map((image) => image.index);
+  const share = (position: number): number[] =>
+    usable.length === 0
+      ? []
+      : [usable[position % usable.length]!, usable[(position + 1) % usable.length]!];
+
+  const sections = (site.sections ?? [])
+    .filter((section) => section.title && section.text.length > 40)
+    .slice(0, count);
+
+  if (sections.length > 0) {
+    return sections.map((section, position) => ({
+      title: section.title,
+      url: site.url,
+      description: section.text,
+      imageIndexes: share(position),
+    }));
+  }
+
+  const pitch = [site.description, site.pageText].filter(Boolean).join(" ").slice(0, 600);
+  if (!site.title && !pitch) return [];
+  return [{ title: site.title || site.siteName, url: site.url, description: pitch, imageIndexes: share(0) }];
+}
+
 export class TemplateWriter implements Writer {
   readonly id = "template";
   readonly name = "rédacteur intégré (hors ligne, sans compte)";
@@ -278,25 +332,36 @@ export class TemplateWriter implements Writer {
       return score(b) - score(a);
     });
 
-    const selected = ranked.slice(0, count);
+    let selected = ranked.slice(0, count);
+    let kind: "product" | "site" = "product";
+
+    // Beaucoup de sites n'ont pas de catalogue. Plutôt que d'abandonner, on parle du site
+    // lui-même, à partir de ses titres de section puis de son texte de présentation.
+    if (selected.length === 0) {
+      selected = fallbackSubjects(site, count);
+      kind = "site";
+    }
     if (selected.length === 0) {
       throw new Error(
-        "Aucun produit ni aucune page exploitable n'a été trouvé sur ce site. " +
-          "Indiquez l'adresse d'une page de collection ou de catalogue, ou utilisez un rédacteur en ligne " +
-          "(VIDO_WRITER=ollama) capable de travailler à partir du seul texte de la page.",
+        `La page de ${site.domain} a été lue, mais elle ne contient ni fiche produit, ni titre, ni texte ` +
+          "exploitable. Indiquez l'adresse d'une page de contenu — une collection, un catalogue, une page « à propos ».",
       );
     }
 
-    options.onProgress?.(`${selected.length} vidéo(s) construite(s) depuis le catalogue`);
+    options.onProgress?.(
+      kind === "product"
+        ? `${selected.length} vidéo(s) construite(s) depuis le catalogue`
+        : `${selected.length} vidéo(s) construite(s) depuis le contenu de la page`,
+    );
 
     const subject = subjectFromBrief(options.brief, lang === "fr" ? "pièces" : "pieces");
     const accentColor = await accentFromSite(site);
 
     const videos: VideoPlan[] = selected.map((product, index) => {
-      const scenes = scenesForProduct(product, site, book, index);
+      const scenes = scenesForProduct(product, site, book, index, kind);
 
-      // Sur une série, la première vidéo annonce le programme.
-      if (selected.length > 1 && index === 0) {
+      // Sur une série de produits, la première vidéo annonce le programme.
+      if (selected.length > 1 && index === 0 && kind === "product") {
         scenes[0] = {
           narration: book.listHook(selected.length, subject),
           onScreenText: `${selected.length} ${subject.toUpperCase()}`.slice(0, 30),
@@ -311,9 +376,13 @@ export class TemplateWriter implements Writer {
         concept: label,
         scenes,
         youtubeTitle: truncate(
-          selected.length > 1
-            ? book.seriesTitle(index + 1, selected.length, label)
-            : book.title(label, site.siteName),
+          kind === "site"
+            ? selected.length > 1
+              ? book.siteSeriesTitle(index + 1, selected.length, label, site.siteName)
+              : book.siteTitle(site.siteName)
+            : selected.length > 1
+              ? book.seriesTitle(index + 1, selected.length, label)
+              : book.title(label, site.siteName),
           98,
         ),
         youtubeDescription: book.description(label, site.siteName, site.url),

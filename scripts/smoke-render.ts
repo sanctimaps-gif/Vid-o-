@@ -50,6 +50,7 @@ async function main(): Promise<void> {
     description: "Boutique de démonstration",
     pageText: "",
     products: [],
+    sections: [],
     pagesVisited: [],
     images: images.map((localPath, index) => ({
       index,

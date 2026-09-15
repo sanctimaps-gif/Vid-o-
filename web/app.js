@@ -1,4 +1,4 @@
-import { crawlSite, loadImages } from "./scrape.js";
+import { ReadFailure, crawlSite, loadImages, preferredSource, resetTransport } from "./scrape.js";
 import { writeCampaign, requestedCount } from "./writer.js";
 import { isSupported, renderVideo } from "./render.js";
 
@@ -119,6 +119,36 @@ function addResult(video, file, index) {
   results.hidden = false;
 }
 
+/**
+ * Dire ce qui a échoué, et quoi faire ensuite. « Failed to fetch » tout seul
+ * n'aide personne : on distingue le site injoignable du site lu mais vide.
+ */
+function explain(error, url) {
+  let host = url;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    /* adresse déjà validée en amont */
+  }
+
+  if (error instanceof ReadFailure) {
+    return [
+      `Impossible de lire ${host} depuis le navigateur.`,
+      "",
+      "Trois causes possibles :",
+      "• l'adresse est erronée, ou la page demande une connexion ;",
+      "• le site bloque la lecture par un service tiers ;",
+      "• les relais publics sont momentanément saturés — réessayez dans une minute.",
+      "",
+      "La version ordinateur, plus bas, lit les sites directement et n'a pas cette limite.",
+      "",
+      `Détail technique : ${error.reasons.slice(0, 4).join(" · ")}`,
+    ].join("\n");
+  }
+
+  return `${error.message}\n\nLa version ordinateur, plus bas, lit les sites directement.`;
+}
+
 /* ------------------------------------------------------------------ *
  * Génération
  * ------------------------------------------------------------------ */
@@ -152,8 +182,13 @@ form.addEventListener("submit", async (event) => {
 
   try {
     say("Lecture du site…");
+    resetTransport();
     const site = await crawlSite(url, { onProgress: (message) => say(`Lecture du site — ${message}`) });
-    say(`${site.products.length} fiche(s) trouvée(s), téléchargement des visuels…`);
+    const found =
+      site.products.length > 0
+        ? `${site.products.length} fiche(s) produit`
+        : `${site.sections?.length ?? 0} section(s) de page`;
+    say(`${found} — téléchargement des visuels…`);
 
     const loaded = await loadImages(site, {
       onProgress: (message) => say(`Visuels — ${message}`),
@@ -166,7 +201,8 @@ form.addEventListener("submit", async (event) => {
       brief,
       Number.isFinite(requested) && requested > 0 ? requested : requestedCount(brief),
     );
-    say(`${plan.videos.length} vidéo(s) à monter pour ${plan.brandName}.`);
+    const via = preferredSource();
+    say(`${plan.videos.length} vidéo(s) à monter pour ${plan.brandName}${via ? ` (lu via ${via})` : ""}.`);
 
     stage.hidden = false;
     for (const [index, video] of plan.videos.entries()) {
@@ -194,9 +230,7 @@ form.addEventListener("submit", async (event) => {
   } catch (error) {
     stage.hidden = true;
     say("La génération s'est arrêtée.", "error");
-    warn(
-      `${error.message}\n\nSi le site refuse d'être lu depuis un navigateur, essayez la version ordinateur : elle lit les sites directement.`,
-    );
+    warn(explain(error, url));
   } finally {
     submit.disabled = false;
   }

@@ -24,6 +24,16 @@ const PHRASES = {
     ],
     detailIntro: ["A retenir", "En bref", "Ce qu'il faut savoir", "Le detail"],
     transitions: ["Voila ce qu'il faut savoir dessus.", "Dans le detail, ca donne ceci."],
+    siteHooks: [
+      "Prenez trente secondes, on vous montre ce qu'il y a ici.",
+      "Vous ne connaissez pas encore cet endroit. Ca vaut le detour.",
+      "Voila ce qu'on peut trouver sur ce site.",
+      "On vous fait faire le tour, restez jusqu'a la fin.",
+      "Il y a de quoi faire ici, on vous montre.",
+    ],
+    siteHookTexts: ["A DECOUVRIR", "LE TOUR DU PROPRIETAIRE", "CA SE PASSE ICI", "REGARDEZ CA", "TRENTE SECONDES"],
+    siteTitle: (brand) => `${brand}, en trente secondes #Shorts`,
+    siteSeriesTitle: (position, total, topic, brand) => `${position}/${total} — ${topic} | ${brand} #Shorts`,
     priceLine: (price) => `Elle est affichee a ${price} sur le site.`,
     ctaLines: [
       "Tout est sur le site, le lien est juste en dessous.",
@@ -57,6 +67,16 @@ const PHRASES = {
     ],
     detailIntro: ["Worth knowing", "In short", "What to know", "The detail"],
     transitions: ["Here is what you should know about it.", "Here it is in detail."],
+    siteHooks: [
+      "Give us thirty seconds and we will show you around.",
+      "You do not know this place yet. It is worth a look.",
+      "Here is what you can find on this site.",
+      "We are taking you through it, stay until the end.",
+      "There is a lot here. Let us show you.",
+    ],
+    siteHookTexts: ["TAKE A LOOK", "THE FULL TOUR", "IT HAPPENS HERE", "LOOK AT THIS", "THIRTY SECONDS"],
+    siteTitle: (brand) => `${brand}, in thirty seconds #Shorts`,
+    siteSeriesTitle: (position, total, topic, brand) => `${position}/${total} — ${topic} | ${brand} #Shorts`,
     priceLine: (price) => `It is listed at ${price} on the site.`,
     ctaLines: [
       "Everything is on the site, link right below.",
@@ -184,6 +204,42 @@ function accentFromBitmap(bitmap) {
   }
 }
 
+/**
+ * Sujets de repli quand le site n'expose aucune fiche produit :
+ * d'abord ses titres de section, sinon la page d'accueil prise dans son ensemble.
+ * Chaque sujet reçoit ses propres visuels, pour que les vidéos ne se ressemblent pas.
+ */
+function fallbackSubjects(site, total) {
+  const usable = site.images.filter((image) => image.bitmap).map((image) => image.index);
+  const share = (position) =>
+    usable.length === 0 ? [] : [usable[position % usable.length], usable[(position + 1) % usable.length]];
+
+  const sections = (site.sections ?? [])
+    .filter((section) => section.title && section.text.length > 40)
+    .slice(0, total);
+
+  if (sections.length > 0) {
+    return sections.map((section, position) => ({
+      title: section.title,
+      url: site.url,
+      description: section.text,
+      imageIndexes: share(position),
+    }));
+  }
+
+  // Aucun titre exploitable : une seule vidéo, construite sur la présentation du site.
+  const pitch = [site.description, site.pageText].filter(Boolean).join(" ").slice(0, 600);
+  if (!site.title && !pitch) return [];
+  return [
+    {
+      title: site.title || site.siteName,
+      url: site.url,
+      description: pitch,
+      imageIndexes: share(0),
+    },
+  ];
+}
+
 export function writeCampaign(site, brief, count) {
   const lang = detectLang(site, brief);
   const book = PHRASES[lang];
@@ -197,11 +253,19 @@ export function writeCampaign(site, brief, count) {
     return score(b) - score(a);
   });
 
-  const selected = ranked.slice(0, total);
+  let selected = ranked.slice(0, total);
+  let kind = "product";
+
+  // Beaucoup de sites n'ont pas de fiches produit. Plutôt que d'abandonner, on parle
+  // du site lui-même, à partir de ses titres de section puis de son texte.
+  if (selected.length === 0) {
+    selected = fallbackSubjects(site, total);
+    kind = "site";
+  }
   if (selected.length === 0) {
     throw new Error(
-      "Aucune fiche produit exploitable n'a été trouvée. Essayez l'adresse d'une page de collection " +
-        "ou de catalogue plutôt que la page d'accueil.",
+      `La page de ${site.domain} a été lue, mais elle ne contient ni fiche produit, ni titre, ni texte ` +
+        "exploitable. Essayez l'adresse d'une page de contenu — une collection, un catalogue, une page « à propos ».",
     );
   }
 
@@ -215,8 +279,8 @@ export function writeCampaign(site, brief, count) {
 
     const scenes = [
       {
-        narration: pick(book.hooks, index),
-        onScreenText: pick(book.hookTexts, index),
+        narration: pick(kind === "site" ? book.siteHooks : book.hooks, index),
+        onScreenText: pick(kind === "site" ? book.siteHookTexts : book.hookTexts, index),
         imageIndex: image(0),
         role: "hook",
       },
@@ -263,7 +327,7 @@ export function writeCampaign(site, brief, count) {
       role: "cta",
     });
 
-    if (selected.length > 1 && index === 0) {
+    if (selected.length > 1 && index === 0 && kind === "product") {
       scenes[0] = {
         narration: book.listHook(selected.length, subject),
         onScreenText: `${selected.length} ${subject.toUpperCase()}`.slice(0, 30),
@@ -277,9 +341,13 @@ export function writeCampaign(site, brief, count) {
       slug: slugify(product.title, `video-${index + 1}`),
       concept: label,
       scenes,
-      youtubeTitle: (selected.length > 1
-        ? book.seriesTitle(index + 1, selected.length, label)
-        : book.title(label, site.siteName)
+      youtubeTitle: (kind === "site"
+        ? selected.length > 1
+          ? book.siteSeriesTitle(index + 1, selected.length, label, site.siteName)
+          : book.siteTitle(site.siteName)
+        : selected.length > 1
+          ? book.seriesTitle(index + 1, selected.length, label)
+          : book.title(label, site.siteName)
       ).slice(0, 98),
       youtubeDescription: book.description(label, site.siteName, site.url),
       hashtags: [slugify(site.siteName, "boutique").replace(/-/g, ""), ...book.defaultTags.slice(0, 2)],
