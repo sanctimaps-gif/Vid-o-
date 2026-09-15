@@ -10,7 +10,8 @@ un rédacteur intégré qui fonctionne hors ligne. Les rédacteurs plus fins son
 Ollama en local, ou le palier gratuit de Groq, Google AI Studio, OpenRouter ou Mistral.
 
 **Essayez sans rien installer :** [sanctimaps-gif.github.io/Vid-o-](https://sanctimaps-gif.github.io/Vid-o-/)
-fabrique les vidéos directement dans votre navigateur, y compris sur téléphone.
+fabrique les vidéos directement dans votre navigateur, y compris sur téléphone, et poursuit le
+montage quand la page passe en arrière-plan.
 
 ```
 vido "https://ma-boutique.fr" "fais découvrir à l'auditeur les 5 meilleures tenues du magasin, une vidéo par tenue"
@@ -179,6 +180,7 @@ polices.
 | Musique de fond | composée par Vid-O, sans droits à gérer | vos fichiers dans `assets/music/` |
 | Page du site à l'écran | capture réelle, sinon page reconstituée | visuels du site |
 | Sortie | MP4 ou WebM selon le navigateur | MP4 H.264/AAC |
+| Pendant le montage | continue en arrière-plan, écran maintenu allumé | c'est un programme, rien à surveiller |
 | Rédacteur | intégré | intégré, Ollama, paliers gratuits, Claude |
 
 Le code de la page navigateur est dans `web/` et `index.html` ; celui de la version ordinateur

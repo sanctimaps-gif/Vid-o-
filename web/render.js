@@ -9,6 +9,7 @@
 
 import { normalize } from "./writer.js";
 import { makeMusic, pickMood, speak } from "./audio.js";
+import { createTicker } from "./ticker.js";
 
 const PAD_START = 0.3;
 const PAD_END = 0.55;
@@ -574,7 +575,16 @@ export async function renderVideo({
   }
 
   const hero = site.images.find((image) => image.bitmap)?.bitmap ?? null;
-  const stream = canvas.captureStream(30);
+
+  // Avec `captureStream(0)`, aucune image n'est prélevée automatiquement : c'est nous
+  // qui poussons chaque image dessinée. Le montage ne dépend donc plus de l'affichage
+  // de la page, et continue quand l'onglet passe derrière.
+  const manual =
+    typeof canvas.captureStream === "function" &&
+    typeof canvas.captureStream(0).getVideoTracks()[0]?.requestFrame === "function";
+  const stream = canvas.captureStream(manual ? 0 : 30);
+  const videoTrack = stream.getVideoTracks()[0];
+
   const destination = audioContext.createMediaStreamDestination();
   for (const track of destination.stream.getAudioTracks()) stream.addTrack(track);
 
@@ -603,19 +613,28 @@ export async function renderVideo({
 
   const drawContext = { scenes, plan, site, screenshot, hero, totalDuration, position, total, W, H };
   let thumbnail = null;
+  const ticker = createTicker(1000 / 30);
 
   await new Promise((resolve) => {
+    let done = false;
     const step = () => {
+      if (done) return;
+      // L'image dessinée suit l'horloge réelle, celle que suit aussi le son : une
+      // interruption coûte des images, jamais le synchronisme avec la voix.
       const elapsed = Math.max(0, (performance.now() - startedAt) / 1000);
       drawFrame(ctx, drawContext, Math.min(elapsed, totalDuration));
+      if (manual) videoTrack.requestFrame();
 
       if (!thumbnail && elapsed > 1.1) thumbnail = canvas.toDataURL("image/jpeg", 0.85);
       onProgress?.(Math.min(1, elapsed / totalDuration));
 
-      if (elapsed >= totalDuration) resolve();
-      else requestAnimationFrame(step);
+      if (elapsed >= totalDuration) {
+        done = true;
+        ticker.stop();
+        resolve();
+      }
     };
-    requestAnimationFrame(step);
+    ticker.start(step);
   });
 
   recorder.stop();

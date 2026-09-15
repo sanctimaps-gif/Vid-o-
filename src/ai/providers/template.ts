@@ -146,6 +146,16 @@ function pick<T>(list: T[], index: number): T {
   return list[index % list.length]!;
 }
 
+/** Raccourcit sans couper un mot en deux. */
+function trimWords(text: string, max: number): string {
+  const clean = text.trim();
+  if (clean.length <= max) return clean;
+  const cut = clean.slice(0, max);
+  const space = cut.lastIndexOf(" ");
+  return (space > max * 0.5 ? cut.slice(0, space) : cut).trim();
+}
+
+
 /** Découpe une description en phrases courtes, utilisables telles quelles en voix off. */
 function sentences(text: string | undefined, limit: number): string[] {
   if (!text) return [];
@@ -252,7 +262,7 @@ function subjectFromBrief(brief: string, fallback: string): string {
   const match = /\b(?:sur|about|des|les|of the|the)\s+(?:\d+\s+)?(?:meilleur(?:e|s|es)?\s+|best\s+|top\s+)?([\p{L}\s]{3,28})/iu.exec(
     brief,
   );
-  const captured = match?.[1]?.trim();
+  const captured = match?.[1]?.trim().split(/\s+/).slice(0, 3).join(" ");
   return captured && captured.length > 2 ? captured.toLowerCase() : fallback;
 }
 
@@ -364,7 +374,7 @@ export class TemplateWriter implements Writer {
       if (selected.length > 1 && index === 0 && kind === "product") {
         scenes[0] = {
           narration: book.listHook(selected.length, subject),
-          onScreenText: `${selected.length} ${subject.toUpperCase()}`.slice(0, 30),
+          onScreenText: trimWords(`${selected.length} ${subject.toUpperCase()}`, 30),
           imageIndex: scenes[0]?.imageIndex ?? -1,
           role: "hook",
         };

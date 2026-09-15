@@ -9,6 +9,7 @@ import {
 import { writeCampaign, requestedCount } from "./writer.js";
 import { isSupported, renderVideo } from "./render.js";
 import { MOOD_NAMES, pickMood } from "./audio.js";
+import { keepScreenAwake, releaseScreen, screenIsAwake } from "./ticker.js";
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -32,6 +33,25 @@ function warn(message) {
   notice.hidden = false;
   notice.textContent = message;
 }
+
+/* ------------------------------------------------------------------ *
+ * Rester en vie pendant le montage
+ * ------------------------------------------------------------------ */
+
+let running = false;
+
+// Le verrou d'écran est relâché par le navigateur à chaque passage en arrière-plan :
+// on le reprend dès le retour, tant qu'un montage est en cours.
+document.addEventListener("visibilitychange", () => {
+  if (running && document.visibilityState === "visible" && !screenIsAwake()) void keepScreenAwake();
+});
+
+// Fermer l'onglet perdrait les vidéos en cours : le navigateur demande confirmation.
+window.addEventListener("beforeunload", (event) => {
+  if (!running) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
 
 if (!isSupported()) {
   warn(
@@ -159,6 +179,11 @@ form.addEventListener("submit", async (event) => {
   canvas.height = height;
 
   submit.disabled = true;
+  running = true;
+  const awake = await keepScreenAwake();
+  $("#stage-hint").textContent = awake
+    ? "L'écran reste allumé jusqu'à la fin. Vous pouvez poser le téléphone, ou changer d'application : le montage continue."
+    : "Le montage continue même si vous changez d'onglet. Évitez simplement de fermer la page.";
   notice.hidden = true;
   panel.hidden = false;
   results.hidden = true;
@@ -235,5 +260,7 @@ form.addEventListener("submit", async (event) => {
     warn(explain(error, url));
   } finally {
     submit.disabled = false;
+    running = false;
+    await releaseScreen();
   }
 });
