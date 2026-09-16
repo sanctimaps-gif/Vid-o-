@@ -147,18 +147,38 @@ function race(sources, url, options, sticky = true) {
  * Récupère une ressource distante. Le premier appel met les chemins en concurrence ;
  * les suivants réutilisent le gagnant, et ne relancent une course qu'en cas d'échec.
  */
-export async function fetchRemote(url, { as = "text", timeout = 20000, sticky = true } = {}) {
+export async function fetchRemote(url, { as = "text", timeout = 15000, sticky = true, single = false } = {}) {
   const wantsBytes = as === "blob" || as === "image";
   const usable = SOURCES.filter((source) => !wantsBytes || source.binary);
 
   if (preferred && usable.includes(preferred)) {
     try {
       return await attempt(preferred, url, { as, timeout });
-    } catch {
-      /* le chemin habituel a lâché : on relance une course complète */
+    } catch (error) {
+      // `single` : requête exploratoire dont l'échec est banal (une sonde de
+      // plateforme). Inutile d'essayer tous les relais pour confirmer une absence.
+      if (single) throw error;
     }
   }
+  if (single && preferred) throw new Error("sonde sans résultat");
   return race(usable, url, { as, timeout }, sticky);
+}
+
+/** Exécute `task` sur chaque élément, `limit` à la fois. */
+async function mapLimit(items, limit, task) {
+  const results = new Array(items.length);
+  let cursor = 0;
+
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await task(items[index], index);
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
 }
 
 /* ------------------------------------------------------------------ *
@@ -361,9 +381,22 @@ function isThin(page) {
  * Catalogues des plateformes courantes
  * ------------------------------------------------------------------ */
 
+/**
+ * Indices de plateforme laissés dans le HTML. Sonder `/products.json` sur un site
+ * qui n'est pas Shopify coûtait un aller-retour par relais, tous voués à l'échec :
+ * plusieurs secondes perdues sur la grande majorité des sites.
+ */
+function looksLikeShopify(html) {
+  return /cdn\.shopify\.com|\/cdn\/shop\/|Shopify\.theme|shopify-section/i.test(html);
+}
+
+function looksLikeWooCommerce(html) {
+  return /woocommerce|wp-content\/plugins\/woo|wc-block|wp-json\/wc\//i.test(html);
+}
+
 async function tryShopify(origin, onProgress) {
   try {
-    const raw = await fetchRemote(`${origin}/products.json?limit=30`, { timeout: 12000 });
+    const raw = await fetchRemote(`${origin}/products.json?limit=30`, { timeout: 8000, single: true });
     const data = JSON.parse(raw);
     if (!Array.isArray(data.products) || data.products.length === 0) return [];
     onProgress?.(`catalogue Shopify détecté (${data.products.length} produits)`);
@@ -389,7 +422,10 @@ async function tryShopify(origin, onProgress) {
 
 async function tryWooCommerce(origin, onProgress) {
   try {
-    const raw = await fetchRemote(`${origin}/wp-json/wc/store/products?per_page=30`, { timeout: 12000 });
+    const raw = await fetchRemote(`${origin}/wp-json/wc/store/products?per_page=30`, {
+      timeout: 8000,
+      single: true,
+    });
     const data = JSON.parse(raw);
     if (!Array.isArray(data) || data.length === 0) return [];
     onProgress?.(`catalogue WooCommerce détecté (${data.length} produits)`);
@@ -427,8 +463,10 @@ export async function crawlSite(startUrl, { maxPages = 6, onProgress } = {}) {
 
   let home;
   let readVia;
+  let rawHtml = "";
   try {
-    home = extractPage(await fetchRemote(startUrl), startUrl);
+    rawHtml = await fetchRemote(startUrl, { timeout: 12000 });
+    home = extractPage(rawHtml, startUrl);
     readVia = preferredSource();
   } catch (error) {
     // Aucun chemin HTML n'a abouti : le lecteur reste la dernière chance.
@@ -471,8 +509,9 @@ export async function crawlSite(startUrl, { maxPages = 6, onProgress } = {}) {
     }
   }
 
-  let rawProducts = await tryShopify(origin, onProgress);
-  if (rawProducts.length === 0) rawProducts = await tryWooCommerce(origin, onProgress);
+  let rawProducts = [];
+  if (looksLikeShopify(rawHtml)) rawProducts = await tryShopify(origin, onProgress);
+  else if (looksLikeWooCommerce(rawHtml)) rawProducts = await tryWooCommerce(origin, onProgress);
 
   if (rawProducts.length < 4) {
     const candidates = [...new Set(home.links)]
@@ -486,16 +525,16 @@ export async function crawlSite(startUrl, { maxPages = 6, onProgress } = {}) {
       })
       .slice(0, maxPages);
 
-    for (const [index, link] of candidates.entries()) {
-      onProgress?.(`page ${index + 1}/${candidates.length}`);
+    let done = 0;
+    const fetched = await mapLimit(candidates, 4, async (link) => {
       try {
-        const page = extractPage(await fetchRemote(link, { timeout: 15000 }), link);
+        const page = extractPage(await fetchRemote(link, { timeout: 12000 }), link);
         const product = flattenJsonLd(page.jsonLd).find(
           (node) =>
             node["@type"] === "Product" ||
             (Array.isArray(node["@type"]) && node["@type"].includes("Product")),
         );
-        rawProducts.push({
+        return {
           title: String(product?.name ?? page.title).trim(),
           url: link,
           price: priceFromOffers(product?.offers),
@@ -504,11 +543,15 @@ export async function crawlSite(startUrl, { maxPages = 6, onProgress } = {}) {
             .trim()
             .slice(0, 600),
           images: page.images.slice(0, 2),
-        });
+        };
       } catch {
-        /* page inaccessible : on continue avec les autres */
+        return null;
+      } finally {
+        done += 1;
+        onProgress?.(`page ${done}/${candidates.length}`);
       }
-    }
+    });
+    rawProducts.push(...fetched.filter(Boolean));
   }
 
   // Banque d'images indexée, sans doublon.
@@ -569,21 +612,23 @@ export async function loadImages(site, { limit = 10, onProgress } = {}) {
   let loaded = 0;
   let tried = 0;
 
-  for (const image of site.images) {
-    if (loaded >= limit) break;
+  // Quatre téléchargements de front : sur un téléphone, les faire l'un après
+  // l'autre passait l'essentiel du temps à attendre le réseau.
+  await mapLimit(site.images.slice(0, limit + 6), 4, async (image) => {
+    if (loaded >= limit) return;
     tried += 1;
     try {
-      const bitmap = await fetchRemote(image.url, { as: "image", timeout: 20000 });
+      const bitmap = await fetchRemote(image.url, { as: "image", timeout: 12000 });
       // Les pictogrammes et les bandeaux très étirés ne font pas un bon fond.
       const ratio = bitmap.width / bitmap.height;
-      if (bitmap.width < 300 || bitmap.height < 260 || ratio > 4 || ratio < 0.25) continue;
+      if (bitmap.width < 300 || bitmap.height < 260 || ratio > 4 || ratio < 0.25) return;
       image.bitmap = bitmap;
       loaded += 1;
       onProgress?.(`${loaded} visuel(s) sur ${tried} essayé(s)`);
     } catch {
       /* visuel inaccessible ou illisible : on passe au suivant */
     }
-  }
+  });
   return loaded;
 }
 
@@ -591,7 +636,7 @@ export async function loadImages(site, { limit = 10, onProgress } = {}) {
  * Capture de la page réelle, par le service gratuit de WordPress.
  * C'est un bonus : s'il ne répond pas, la vidéo se rabat sur une page reconstituée.
  */
-export async function siteScreenshot(url, { width = 720, timeout = 25000 } = {}) {
+export async function siteScreenshot(url, { width = 720, timeout = 18000 } = {}) {
   const shot = `https://s.wordpress.com/mshots/v1/${encodeURIComponent(url)}?w=${width}`;
   try {
     const bitmap = await withTimeout(

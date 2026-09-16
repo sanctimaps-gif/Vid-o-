@@ -144,17 +144,30 @@ function roundedRect(ctx, x, y, width, height, radius) {
 
 export async function prepareScenes(video, site, options) {
   const { audioContext, withVoice, lang, voiceIndex = 0, onProgress } = options;
+  const narrations = video.scenes.map((scene) => normalize(scene.narration));
+
+  // Les phrases sont synthétisées de front : les enchaîner faisait attendre le
+  // réseau autant de fois qu'il y a de scènes, avant même le début du montage.
+  let ready = 0;
+  const voices = await Promise.all(
+    narrations.map(async (narration) => {
+      if (!withVoice || !narration) return null;
+      try {
+        const buffer = await speak(audioContext, narration, lang, voiceIndex);
+        return buffer;
+      } finally {
+        ready += 1;
+        onProgress?.(`voix ${ready}/${narrations.length}`);
+      }
+    }),
+  );
+
   const prepared = [];
   let offset = 0;
 
   for (const [index, scene] of video.scenes.entries()) {
-    const narration = normalize(scene.narration);
-
-    let voice = null;
-    if (withVoice && narration) {
-      onProgress?.(`voix ${index + 1}/${video.scenes.length}`);
-      voice = await speak(audioContext, narration, lang, voiceIndex);
-    }
+    const narration = narrations[index];
+    const voice = voices[index];
 
     // La durée suit la voix réelle quand il y en a une : les sous-titres tombent juste.
     const spoken = voice ? voice.duration : estimateSpeechSeconds(narration);

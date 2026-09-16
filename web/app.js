@@ -195,6 +195,12 @@ form.addEventListener("submit", async (event) => {
   try {
     say("Lecture du site…");
     resetTransport();
+
+    // La capture part tout de suite et travaille pendant qu'on lit le site :
+    // l'attendre à la fin ajoutait son temps entier à celui de l'analyse.
+    const screenshotPromise = siteScreenshot(url, { width: canvas.width >= 1080 ? 900 : 720 }).catch(
+      () => null,
+    );
     const site = await crawlSite(url, { onProgress: (message) => say(`Lecture du site — ${message}`) });
     const found =
       site.products.length > 0
@@ -216,9 +222,18 @@ form.addEventListener("submit", async (event) => {
     const via = preferredSource();
     say(`${plan.videos.length} vidéo(s) à monter pour ${plan.brandName}${via ? ` (lu via ${via})` : ""}.`);
 
-    // Capture de la vraie page : c'est elle qu'on voit à l'ouverture et à la fin.
-    say("Capture de la page…");
-    const screenshot = await siteScreenshot(site.url, { width: canvas.width >= 1080 ? 900 : 720 });
+    // Si la capture n'est pas encore prête, on ne la fait pas attendre : la première
+    // vidéo part sans elle, les suivantes en profiteront.
+    let screenshot = await Promise.race([
+      screenshotPromise,
+      new Promise((resolve) => setTimeout(() => resolve(undefined), 2500)),
+    ]);
+    if (screenshot === undefined) {
+      screenshot = null;
+      void screenshotPromise.then((late) => {
+        if (late) screenshot = late;
+      });
+    }
 
     const audioContext = new (window.AudioContext ?? window.webkitAudioContext)();
     if (audioContext.state === "suspended") await audioContext.resume();
