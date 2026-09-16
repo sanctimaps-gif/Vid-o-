@@ -93,7 +93,10 @@
       </form>
 
       <section id="panel" class="card" hidden>
-        <p id="status" class="status">Préparation…</p>
+        <p class="status-row">
+          <span id="status" class="status">Préparation…</span>
+          <span id="elapsed" class="elapsed">0:00</span>
+        </p>
         <div class="track"><div id="bar" class="bar"></div></div>
         <div id="stage" class="stage" hidden>
           <canvas id="canvas" width="1080" height="1920"></canvas>
@@ -102,6 +105,13 @@
             Vous pouvez laisser la page de côté.
           </p>
         </div>
+        <details id="report" hidden>
+          <summary>Relevé de la génération</summary>
+          <pre id="report-body"></pre>
+          <p class="hint">
+            Si une étape vous paraît anormalement longue, ce relevé dit laquelle.
+          </p>
+        </details>
       </section>
 
       <section id="results" hidden>

@@ -17,16 +17,51 @@ const form = $("#form");
 const submit = $("#submit");
 const notice = $("#notice");
 const panel = $("#panel");
-const stage = $("#stage");
+const stageArea = $("#stage");
 const canvas = $("#canvas");
 const statusLine = $("#status");
 const bar = $("#bar");
 const results = $("#results");
 const grid = $("#grid");
 
+let startedAt = 0;
+let elapsedTimer = null;
+let stageAt = 0;
+const stages = [];
+
 function say(message, kind = "info") {
   statusLine.textContent = message;
   statusLine.dataset.kind = kind;
+}
+
+/** Note la durée d'une étape, pour le relevé affiché à la fin. */
+function stage(label, detail = "") {
+  const now = performance.now();
+  stages.push({ label, detail, seconds: (now - stageAt) / 1000 });
+  stageAt = now;
+}
+
+/**
+ * Relevé de la génération. Sans lui, « c'est long » reste invérifiable :
+ * on ne sait pas quelle étape traîne, ni sur quel site.
+ */
+function showReport(site, extra) {
+  const total = (performance.now() - startedAt) / 1000;
+  const lines = stages.map(
+    ({ label, detail, seconds }) => `${seconds.toFixed(1).padStart(5)} s  ${label}${detail ? ` — ${detail}` : ""}`,
+  );
+  lines.push(`${total.toFixed(1).padStart(5)} s  TOTAL`);
+  if (site) {
+    lines.push("");
+    lines.push(
+      `${site.domain} — ${site.products.length} produit(s), ${site.sections?.length ?? 0} section(s), ` +
+        `${site.images.filter((image) => image.bitmap).length}/${site.images.length} visuel(s) — lu via ${site.readVia ?? "?"}`,
+    );
+  }
+  if (extra) lines.push(extra);
+
+  $("#report-body").textContent = lines.join("\n");
+  $("#report").hidden = false;
 }
 
 function warn(message) {
@@ -180,6 +215,15 @@ form.addEventListener("submit", async (event) => {
 
   submit.disabled = true;
   running = true;
+  startedAt = performance.now();
+  stageAt = startedAt;
+  stages.length = 0;
+  $("#report").hidden = true;
+  clearInterval(elapsedTimer);
+  elapsedTimer = setInterval(() => {
+    const seconds = Math.round((performance.now() - startedAt) / 1000);
+    $("#elapsed").textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  }, 1000);
   const awake = await keepScreenAwake();
   $("#stage-hint").textContent = awake
     ? "L'écran reste allumé jusqu'à la fin. Vous pouvez poser le téléphone, ou changer d'application : le montage continue."
@@ -188,7 +232,7 @@ form.addEventListener("submit", async (event) => {
   panel.hidden = false;
   results.hidden = true;
   grid.replaceChildren();
-  stage.hidden = true;
+  stageArea.hidden = true;
   bar.style.width = "0%";
   panel.scrollIntoView({ behavior: "smooth", block: "start" });
 
@@ -202,6 +246,7 @@ form.addEventListener("submit", async (event) => {
       () => null,
     );
     const site = await crawlSite(url, { onProgress: (message) => say(`Lecture du site — ${message}`) });
+    stage("lecture du site", `via ${site.readVia ?? "?"}`);
     const found =
       site.products.length > 0
         ? `${site.products.length} fiche(s) produit`
@@ -211,6 +256,7 @@ form.addEventListener("submit", async (event) => {
     const loaded = await loadImages(site, {
       onProgress: (message) => say(`Visuels — ${message}`),
     });
+    stage("téléchargement des visuels", `${loaded} retenu(s)`);
     say(`${loaded} visuel(s) exploitable(s). Écriture des scripts…`);
 
     const requested = Number(data.get("count"));
@@ -219,6 +265,7 @@ form.addEventListener("submit", async (event) => {
       brief,
       Number.isFinite(requested) && requested > 0 ? requested : requestedCount(brief),
     );
+    stage("écriture des scripts", `${plan.videos.length} vidéo(s)`);
     const via = preferredSource();
     say(`${plan.videos.length} vidéo(s) à monter pour ${plan.brandName}${via ? ` (lu via ${via})` : ""}.`);
 
@@ -242,7 +289,7 @@ form.addEventListener("submit", async (event) => {
     const mood = MOOD_NAMES.includes(chosenMood) ? chosenMood : pickMood(plan.brandName);
     const withVoice = data.get("voice") !== "off";
 
-    stage.hidden = false;
+    stageArea.hidden = false;
     for (const [index, video] of plan.videos.entries()) {
       const position = index + 1;
       const file = await renderVideo({
@@ -263,17 +310,21 @@ form.addEventListener("submit", async (event) => {
         },
       });
       addResult(video, file, position);
+      stage(`montage vidéo ${position}`, `${file.durationSeconds} s de vidéo`);
     }
     await audioContext.close();
 
     bar.style.width = "100%";
-    stage.hidden = true;
+    showReport(site, screenshot ? "capture de la page : obtenue" : "capture de la page : indisponible");
+    stageArea.hidden = true;
     say(`${plan.videos.length} vidéo(s) prête(s). Enregistrez-les puis publiez-les.`, "done");
   } catch (error) {
-    stage.hidden = true;
+    stageArea.hidden = true;
     say("La génération s'est arrêtée.", "error");
     warn(explain(error, url));
+    showReport(null, `arrêt : ${error.message}`);
   } finally {
+    clearInterval(elapsedTimer);
     submit.disabled = false;
     running = false;
     await releaseScreen();

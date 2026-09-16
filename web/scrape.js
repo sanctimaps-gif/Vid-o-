@@ -477,7 +477,7 @@ export async function crawlSite(startUrl, { maxPages = 6, onProgress } = {}) {
           if (!response.ok) throw new Error(`lecteur : réponse ${response.status}`);
           return response.text();
         }),
-        45000,
+        25000,
         "lecteur",
       ), startUrl);
       readVia = READER.id;
@@ -496,7 +496,7 @@ export async function crawlSite(startUrl, { maxPages = 6, onProgress } = {}) {
     try {
       const markdown = await withTimeout(
         fetch(READER.url(startUrl)).then((response) => response.text()),
-        45000,
+        25000,
         "lecteur",
       );
       const rendered = extractMarkdown(markdown, startUrl);
