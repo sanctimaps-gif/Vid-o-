@@ -172,6 +172,66 @@ export function requestedCount(brief, fallback = 3) {
   return fallback;
 }
 
+/**
+ * Mots porteurs de sens dans la consigne. Les verbes d'instruction et les
+ * articles n'aident pas à choisir un produit : seuls les mots de contenu comptent.
+ */
+const STOPWORDS = new Set(
+  ("fais faire fait video videos vidéo vidéos short shorts clip clips sur les des une " +
+    "un le la de du pour avec et en qui que dans mon ma mes notre nos site web page " +
+    "auditeur spectateur decouvrir découvrir decouvre présente presente presenter " +
+    "présenter parle parler montre montrer mettre avant meilleur meilleure meilleurs " +
+    "meilleures top best make about the of for with and my our show tell present " +
+    "promote video videos please then also")
+    .split(" "),
+);
+
+/**
+ * Racine grossière d'un mot : « robes » et « robe » doivent se reconnaître,
+ * sinon une consigne au pluriel ne retrouve jamais un produit au singulier.
+ */
+function stem(word) {
+  return word
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[sx]$/, "");
+}
+
+function wordsOf(text) {
+  return normalize(text ?? "")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter((word) => word.length > 2)
+    .map(stem);
+}
+
+export function briefKeywords(brief) {
+  return [
+    ...new Set(
+      normalize(brief)
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, " ")
+        .split(/\s+/)
+        .filter((word) => word.length > 2 && !STOPWORDS.has(word) && !/^\d+$/.test(word))
+        .map(stem),
+    ),
+  ].filter((word) => word.length > 2);
+}
+
+/** À quel point ce contenu correspond-il à ce qui a été demandé ? */
+function relevance(product, keywords) {
+  if (keywords.length === 0) return 0;
+  const title = new Set(wordsOf(product.title));
+  const body = new Set(wordsOf(product.description));
+  let score = 0;
+  for (const word of keywords) {
+    if (title.has(word)) score += 3;
+    else if (body.has(word)) score += 1;
+  }
+  return score;
+}
+
 function subjectFromBrief(brief, fallback) {
   const match =
     /\b(?:sur|about|des|les|of the|the)\s+(?:\d+\s+)?(?:meilleur(?:e|s|es)?\s+|best\s+|top\s+)?([\p{L}\s]{3,28})/iu.exec(
@@ -219,13 +279,16 @@ function accentFromBitmap(bitmap) {
  * d'abord ses titres de section, sinon la page d'accueil prise dans son ensemble.
  * Chaque sujet reçoit ses propres visuels, pour que les vidéos ne se ressemblent pas.
  */
-function fallbackSubjects(site, total) {
+function fallbackSubjects(site, total, brief) {
   const usable = site.images.filter((image) => image.bitmap).map((image) => image.index);
   const share = (position) =>
     usable.length === 0 ? [] : [usable[position % usable.length], usable[(position + 1) % usable.length]];
 
+  const keywords = briefKeywords(brief);
   const sections = (site.sections ?? [])
     .filter((section) => section.title && section.text.length > 40)
+    .map((section) => ({ ...section, score: relevance({ title: section.title, description: section.text }, keywords) }))
+    .sort((a, b) => b.score - a.score)
     .slice(0, total);
 
   if (sections.length > 0) {
@@ -255,12 +318,17 @@ export function writeCampaign(site, brief, count) {
   const book = PHRASES[lang];
   const total = count ?? requestedCount(brief);
 
+  // La consigne décide d'abord : un produit qu'elle nomme passe devant un produit
+  // simplement bien illustré. À égalité seulement, la richesse de la fiche tranche.
+  const keywords = briefKeywords(brief);
   const ranked = [...site.products].sort((a, b) => {
-    const score = (product) =>
+    const wanted = relevance(b, keywords) - relevance(a, keywords);
+    if (wanted !== 0) return wanted;
+    const richness = (product) =>
       (product.imageIndexes?.length ? 4 : 0) +
       (product.price ? 2 : 0) +
       (product.description && product.description.length > 60 ? 1 : 0);
-    return score(b) - score(a);
+    return richness(b) - richness(a);
   });
 
   let selected = ranked.slice(0, total);
@@ -269,7 +337,7 @@ export function writeCampaign(site, brief, count) {
   // Beaucoup de sites n'ont pas de fiches produit. Plutôt que d'abandonner, on parle
   // du site lui-même, à partir de ses titres de section puis de son texte.
   if (selected.length === 0) {
-    selected = fallbackSubjects(site, total);
+    selected = fallbackSubjects(site, total, brief);
     kind = "site";
   }
   if (selected.length === 0) {

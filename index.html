@@ -69,24 +69,49 @@
           <div class="field">
             <label for="voice">Voix off</label>
             <select id="voice" name="voice">
-              <option value="on">Oui, elle lit le script</option>
+              <option value="on">Oui, elle lit les sous-titres</option>
               <option value="off">Non, sous-titres seuls</option>
             </select>
           </div>
           <div class="field">
-            <label for="mood">Musique</label>
+            <label for="mood">Musique de fond</label>
             <select id="mood" name="mood">
-              <option value="">Choisie pour vous</option>
-              <option value="calme">Calme</option>
-              <option value="elegant">Élégante</option>
-              <option value="energique">Énergique</option>
+              <option value="none">Aucune</option>
+              <option value="file">Mon fichier audio</option>
+              <option value="calme">Composée — calme</option>
+              <option value="elegant">Composée — élégante</option>
+              <option value="energique">Composée — énergique</option>
             </select>
           </div>
         </div>
-        <p class="hint">
-          La musique est composée par Vid-O au moment du montage : elle n'appartient à personne
-          d'autre que vous, aucune réclamation de droits n'est possible sur YouTube.
-        </p>
+
+        <div class="field" id="music-field" hidden>
+          <label for="music">Votre fichier audio</label>
+          <input id="music" name="music" type="file" accept="audio/*" />
+          <p class="hint" id="music-label">
+            Un fichier de votre appareil, dont vous détenez les droits.
+          </p>
+        </div>
+
+        <div class="field">
+          <label for="apikey">Clé d'un modèle gratuit (facultatif)</label>
+          <input
+            id="apikey"
+            name="apikey"
+            type="password"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="gsk_… ou AIza… — laissez vide pour le rédacteur intégré"
+          />
+          <p class="hint">
+            Sans clé, les scripts sont assemblés à partir de tournures préécrites : le sujet et le
+            nombre de vidéos suivent votre consigne, mais pas une demande détaillée. Avec une clé
+            d'un palier gratuit — <a href="https://console.groq.com/keys">Groq</a> ou
+            <a href="https://aistudio.google.com/apikey">Google AI Studio</a>, sans carte bancaire —
+            c'est un vrai modèle qui écrit et votre consigne est suivie à la lettre. La clé reste
+            dans ce navigateur.
+          </p>
+        </div>
 
         <button id="submit" type="submit">Générer mes Shorts</button>
         <p id="notice" class="notice" hidden></p>
@@ -128,17 +153,19 @@
             prix, les descriptions et les photos.
           </li>
           <li>
-            <strong>Écriture.</strong> Les scripts sont composés à partir de ces seules données :
-            accroche, scènes, textes incrustés, titre et description YouTube. Aucun prix ni aucune
-            caractéristique n'est inventé. Sans fiche produit — un site vitrine, un portfolio, un
-            restaurant — Vid-O parle du site lui-même à partir de ses titres de section.
+            <strong>Écriture.</strong> Votre consigne décide du sujet : les mots qu'elle contient
+            servent à choisir les produits ou les sections mises en avant. Les scripts sont ensuite
+            composés à partir des seules données du site — aucun prix ni aucune caractéristique
+            n'est inventé. Avec une clé de modèle gratuite, c'est un vrai modèle qui écrit et la
+            consigne est suivie dans le détail.
           </li>
           <li>
             <strong>Montage.</strong> La vidéo s'ouvre sur votre page réelle, dans une fenêtre de
             navigateur qui défile, puis enchaîne vos visuels plein cadre. Voix off, musique,
             sous-titres et votre couleur de marque — tirée de vos propres images — sont assemblés
-            et enregistrés par votre navigateur. Le montage continue en arrière-plan : l'écran
-            reste allumé tout seul, et changer d'onglet ne l'interrompt pas.
+            et enregistrés par votre navigateur. La voix off lit les sous-titres mot pour mot.
+            Aucune musique n'est ajoutée sans que vous l'ayez demandée. Le montage continue en
+            arrière-plan : l'écran reste allumé tout seul, et changer d'onglet ne l'interrompt pas.
           </li>
         </ol>
         <p class="small">

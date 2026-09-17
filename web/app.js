@@ -8,7 +8,8 @@ import {
 } from "./scrape.js";
 import { writeCampaign, requestedCount } from "./writer.js";
 import { isSupported, renderVideo } from "./render.js";
-import { MOOD_NAMES, pickMood } from "./audio.js";
+import { MOOD_NAMES } from "./audio.js";
+import { providerForKey, writeWithModel } from "./llm.js";
 import { keepScreenAwake, releaseScreen, screenIsAwake } from "./ticker.js";
 
 const $ = (selector) => document.querySelector(selector);
@@ -70,6 +71,38 @@ function warn(message) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Musique : aucune par défaut, sur demande seulement
+ * ------------------------------------------------------------------ */
+
+let musicBuffer = null;
+
+$("#mood").addEventListener("change", (event) => {
+  $("#music-field").hidden = event.target.value !== "file";
+});
+
+$("#music").addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  musicBuffer = null;
+  if (!file) return;
+  try {
+    const context = new (window.AudioContext ?? window.webkitAudioContext)();
+    musicBuffer = await context.decodeAudioData(await file.arrayBuffer());
+    await context.close();
+    $("#music-label").textContent = `${file.name} — utilisé en fond sonore`;
+  } catch {
+    $("#music-label").textContent = "Fichier audio illisible, il sera ignoré.";
+  }
+});
+
+// La clé reste sur l'appareil : elle n'est envoyée qu'au fournisseur choisi.
+try {
+  const saved = localStorage.getItem("vido.key");
+  if (saved) $("#apikey").value = saved;
+} catch {
+  /* stockage indisponible : on s'en passe */
+}
+
+/* ------------------------------------------------------------------ *
  * Rester en vie pendant le montage
  * ------------------------------------------------------------------ */
 
@@ -121,7 +154,7 @@ function addResult(video, file, index) {
   meta.className = "meta";
   meta.textContent =
     `${index} — ${file.durationSeconds}s — ${canvas.width}×${canvas.height} — ` +
-    (file.spoken ? "voix off + musique" : "musique et sous-titres");
+    (file.spoken ? `voix off ${file.spokenScenes}/${file.totalScenes}` : "sous-titres seuls");
 
   const description = document.createElement("pre");
   description.className = "desc";
@@ -260,12 +293,31 @@ form.addEventListener("submit", async (event) => {
     say(`${loaded} visuel(s) exploitable(s). Écriture des scripts…`);
 
     const requested = Number(data.get("count"));
-    const plan = writeCampaign(
-      site,
-      brief,
-      Number.isFinite(requested) && requested > 0 ? requested : requestedCount(brief),
-    );
-    stage("écriture des scripts", `${plan.videos.length} vidéo(s)`);
+    const wanted = Number.isFinite(requested) && requested > 0 ? requested : requestedCount(brief);
+
+    const apiKey = String(data.get("apikey") ?? "").trim();
+    try {
+      if (apiKey) localStorage.setItem("vido.key", apiKey);
+      else localStorage.removeItem("vido.key");
+    } catch {
+      /* stockage indisponible */
+    }
+
+    let plan;
+    let writtenBy = "rédacteur intégré";
+    if (apiKey) {
+      const provider = providerForKey(apiKey);
+      try {
+        say(`Écriture des scripts par ${provider.name}…`);
+        plan = await writeWithModel({ apiKey, site, brief, count: wanted, onProgress: say });
+        writtenBy = provider.name;
+      } catch (error) {
+        // Une clé refusée ou un quota atteint ne doit pas faire échouer la génération.
+        warn(`${error.message}\n\nLes scripts ont été écrits par le rédacteur intégré à la place.`);
+      }
+    }
+    if (!plan) plan = writeCampaign(site, brief, wanted);
+    stage("écriture des scripts", `${plan.videos.length} vidéo(s), par ${writtenBy}`);
     const via = preferredSource();
     say(`${plan.videos.length} vidéo(s) à monter pour ${plan.brandName}${via ? ` (lu via ${via})` : ""}.`);
 
@@ -285,10 +337,11 @@ form.addEventListener("submit", async (event) => {
     const audioContext = new (window.AudioContext ?? window.webkitAudioContext)();
     if (audioContext.state === "suspended") await audioContext.resume();
 
-    const chosenMood = String(data.get("mood") ?? "");
-    const mood = MOOD_NAMES.includes(chosenMood) ? chosenMood : pickMood(plan.brandName);
+    const chosenMood = String(data.get("mood") ?? "none");
+    const mood = MOOD_NAMES.includes(chosenMood) ? chosenMood : null;
     const withVoice = data.get("voice") !== "off";
 
+    let voiceFailed = false;
     stageArea.hidden = false;
     for (const [index, video] of plan.videos.entries()) {
       const position = index + 1;
@@ -302,6 +355,7 @@ form.addEventListener("submit", async (event) => {
         audioContext,
         withVoice,
         mood,
+        musicBuffer: chosenMood === "file" ? musicBuffer : null,
         screenshot,
         onStage: (step) => say(`Vidéo ${position}/${plan.videos.length} — ${step}`),
         onProgress: (ratio) => {
@@ -310,12 +364,31 @@ form.addEventListener("submit", async (event) => {
         },
       });
       addResult(video, file, position);
-      stage(`montage vidéo ${position}`, `${file.durationSeconds} s de vidéo`);
+      stage(
+        `montage vidéo ${position}`,
+        `${file.durationSeconds} s — voix ${file.spokenScenes}/${file.totalScenes}`,
+      );
+      if (withVoice && file.spokenScenes === 0) voiceFailed = true;
+    }
+
+    if (voiceFailed) {
+      warn(
+        "La voix off n'a pas pu être obtenue : les services de synthèse vocale gratuits n'ont pas " +
+          "répondu. Les vidéos gardent leurs sous-titres. Réessayez dans quelques minutes, ou " +
+          "utilisez la version ordinateur, qui synthétise la voix sur votre machine.",
+      );
     }
     await audioContext.close();
 
     bar.style.width = "100%";
-    showReport(site, screenshot ? "capture de la page : obtenue" : "capture de la page : indisponible");
+    showReport(
+      site,
+      [
+        `scripts : ${writtenBy}`,
+        `musique : ${chosenMood === "none" ? "aucune" : chosenMood === "file" ? "votre fichier" : `composée (${mood})`}`,
+        `capture de la page : ${screenshot ? "obtenue" : "indisponible"}`,
+      ].join("\n"),
+    );
     stageArea.hidden = true;
     say(`${plan.videos.length} vidéo(s) prête(s). Enregistrez-les puis publiez-les.`, "done");
   } catch (error) {

@@ -8,7 +8,7 @@
  */
 
 import { normalize } from "./writer.js";
-import { makeMusic, pickMood, speak } from "./audio.js";
+import { makeMusic, speak } from "./audio.js";
 import { createTicker } from "./ticker.js";
 
 const PAD_START = 0.3;
@@ -438,6 +438,7 @@ export function drawFrame(ctx, context, elapsed) {
   // L'ouverture et la conclusion montrent le site lui-même ; entre les deux,
   // ses visuels occupent tout le cadre.
   const asWindow = scene.role !== "body" || (!scene.bitmap && (screenshot || hero));
+  const illustration = scene.bitmap ?? (asWindow ? null : (hero ?? screenshot));
 
   if (asWindow) {
     if (screenshot) {
@@ -448,8 +449,8 @@ export function drawFrame(ctx, context, elapsed) {
       drawBrandBackdrop(ctx, plan, W, H);
     }
     drawSiteWindow(ctx, { screenshot, site, plan, progress, W, H, hero });
-  } else if (scene.bitmap) {
-    drawPhoto(ctx, scene.bitmap, scene.index % 2 === 0 ? 1 + 0.12 * progress : 1.12 - 0.12 * progress, W, H);
+  } else if (illustration) {
+    drawPhoto(ctx, illustration, scene.index % 2 === 0 ? 1 + 0.12 * progress : 1.12 - 0.12 * progress, W, H);
   } else {
     drawBrandBackdrop(ctx, plan, W, H);
   }
@@ -557,7 +558,8 @@ export async function renderVideo({
   total,
   audioContext,
   withVoice = true,
-  mood,
+  mood = null,
+  musicBuffer = null,
   screenshot = null,
   onProgress,
   onStage,
@@ -576,15 +578,15 @@ export async function renderVideo({
   const H = canvas.height;
   const ctx = canvas.getContext("2d", { alpha: false });
 
-  onStage?.("musique");
-  let music = null;
-  try {
-    music = await makeMusic(Math.min(totalDuration + 2, 70), {
-      mood: mood ?? pickMood(plan.brandName),
-      seed: plan.brandName,
-    });
-  } catch {
-    /* sans musique, la vidéo garde la voix et les sous-titres */
+  // Aucune musique n'est ajoutée sans qu'on l'ait demandée.
+  let music = musicBuffer;
+  if (!music && mood) {
+    onStage?.("musique");
+    try {
+      music = await makeMusic(Math.min(totalDuration + 2, 70), { mood, seed: plan.brandName });
+    } catch {
+      /* sans musique, la vidéo garde la voix et les sous-titres */
+    }
   }
 
   const hero = site.images.find((image) => image.bitmap)?.bitmap ?? null;
@@ -661,5 +663,7 @@ export async function renderVideo({
     thumbnail: thumbnail ?? canvas.toDataURL("image/jpeg", 0.85),
     durationSeconds: Number(totalDuration.toFixed(2)),
     spoken: scenes.some((scene) => scene.voice),
+    spokenScenes: scenes.filter((scene) => scene.voice).length,
+    totalScenes: scenes.length,
   };
 }

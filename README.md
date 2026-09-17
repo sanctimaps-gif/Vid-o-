@@ -138,10 +138,10 @@ npm run doctor
 
 ## Musique de fond
 
-**Sur la page navigateur**, la musique est composée à la volée — nappe, arpège, basse, et
-percussions selon l'ambiance choisie (calme, élégante, énergique). Rien n'est téléchargé, donc
-aucune réclamation de droits n'est possible sur ce que vous publiez. Elle s'efface automatiquement
-sous chaque phrase de la voix off.
+**Sur la page navigateur**, aucune musique n'est ajoutée par défaut. Vous pouvez fournir votre
+propre fichier, ou demander une composition à la volée — nappe, arpège, basse et percussions selon
+l'ambiance choisie. Dans ce dernier cas rien n'est téléchargé, donc aucune réclamation de droits
+n'est possible sur ce que vous publiez. La musique s'efface sous chaque phrase de la voix off.
 
 **Sur la version ordinateur**, déposez vos fichiers `.mp3` dans `assets/music/`. Vid-O en attribue
 un par vidéo, l'atténue dès que la voix parle et le fait descendre en fin de vidéo. Sans fichier,
@@ -177,7 +177,8 @@ polices.
 | Installation | aucune | Node.js + FFmpeg |
 | Lecture du site | via un relais public quand le site refuse l'accès direct | directe |
 | Voix off | oui, par un service de synthèse gratuit ; sous-titres seuls s'il ne répond pas | oui, edge-tts, meilleure qualité |
-| Musique de fond | composée par Vid-O, sans droits à gérer | vos fichiers dans `assets/music/` |
+| Musique de fond | aucune par défaut ; votre fichier, ou une composition à la demande | vos fichiers dans `assets/music/` |
+| Suivi de la consigne | mots-clés de la consigne, ou un vrai modèle avec une clé gratuite | rédacteur intégré, Ollama, paliers gratuits, Claude |
 | Page du site à l'écran | capture réelle, sinon page reconstituée | visuels du site |
 | Sortie | MP4 ou WebM selon le navigateur | MP4 H.264/AAC |
 | Pendant le montage | continue en arrière-plan, écran maintenu allumé | c'est un programme, rien à surveiller |
