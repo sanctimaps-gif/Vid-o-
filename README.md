@@ -179,7 +179,7 @@ polices.
 | Voix off | oui, par un service de synthèse gratuit ; sous-titres seuls s'il ne répond pas | oui, edge-tts, meilleure qualité |
 | Musique de fond | aucune par défaut ; votre fichier, ou une composition à la demande | vos fichiers dans `assets/music/` |
 | Suivi de la consigne | mots-clés de la consigne, ou un vrai modèle avec une clé gratuite | rédacteur intégré, Ollama, paliers gratuits, Claude |
-| Page du site à l'écran | capture réelle, sinon page reconstituée | visuels du site |
+| Page du site à l'écran | capture réelle plein écran qui défile, sinon page reconstituée | visuels du site |
 | Sortie | MP4 ou WebM selon le navigateur | MP4 H.264/AAC |
 | Pendant le montage | continue en arrière-plan, écran maintenu allumé | c'est un programme, rien à surveiller |
 | Rédacteur | intégré | intégré, Ollama, paliers gratuits, Claude |
@@ -193,7 +193,8 @@ suivent la même charte visuelle.
 - Il ne publie pas à votre place : les fichiers sont produits, la mise en ligne reste manuelle.
 - Il n'invente pas d'images. S'il n'y a aucune photo exploitable sur le site, les scènes sont
   fabriquées sur un fond aux couleurs de la marque.
-- La capture de votre page passe par le service gratuit de WordPress. S'il ne répond pas, la
-  vidéo montre une page reconstituée avec vos vrais textes et visuels, dans la même fenêtre de
-  navigateur.
+- La capture de votre page est demandée à trois services gratuits en parallèle. Ils fabriquent
+  l'image à la demande et répondent souvent d'abord une image d'attente : Vid-O la reconnaît à son
+  uniformité, la refuse et redemande. Si aucun n'aboutit, la vidéo montre une page reconstituée
+  avec vos vrais textes et visuels.
 - Relisez toujours les scripts avant publication : ce sont vos allégations commerciales.

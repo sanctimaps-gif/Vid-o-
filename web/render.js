@@ -328,6 +328,60 @@ function drawSiteWindow(ctx, { screenshot, site, plan, progress, W, H, hero }) {
   ctx.fillRect(frameX, pageY + pageH - 70 * scale, frameW, 70 * scale);
 }
 
+/**
+ * La page réelle, plein cadre, qui défile du haut vers le bas.
+ * C'est ce plan qui fait qu'on voit le site, et pas seulement son nom.
+ */
+function drawSitePage(ctx, screenshot, site, plan, progress, W, H) {
+  const scale = W / 1080;
+  const zoom = 1 + 0.05 * progress;
+  const drawW = W * zoom;
+  const drawH = (screenshot.height / screenshot.width) * drawW;
+
+  // Défilement : la page descend sur toute la durée de la scène, sans jamais sortir du cadre.
+  const travel = Math.max(0, drawH - H);
+  const offsetY = -travel * Math.min(1, progress * 1.15);
+
+  ctx.fillStyle = "#f7f8fb";
+  ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(screenshot, (W - drawW) / 2, offsetY, drawW, drawH);
+
+  // Si la page est plus courte que le cadre, on comble sous elle plutôt que de laisser du blanc.
+  if (drawH + offsetY < H) {
+    const fill = ctx.createLinearGradient(0, drawH + offsetY, 0, H);
+    fill.addColorStop(0, "rgba(247,248,251,1)");
+    fill.addColorStop(1, plan.backgroundColor);
+    ctx.fillStyle = fill;
+    ctx.fillRect(0, drawH + offsetY, W, H - drawH - offsetY);
+  }
+
+  // Barre d'adresse flottante : on sait quel site on regarde.
+  const barW = Math.min(W * 0.78, 760 * scale);
+  const barH = 66 * scale;
+  const barX = (W - barW) / 2;
+  const barY = 172 * scale;
+
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.35)";
+  ctx.shadowBlur = 28 * scale;
+  ctx.shadowOffsetY = 8 * scale;
+  ctx.fillStyle = "rgba(14,19,32,0.92)";
+  roundedRect(ctx, barX, barY, barW, barH, barH / 2);
+  ctx.restore();
+
+  ctx.fillStyle = plan.accentColor;
+  ctx.beginPath();
+  ctx.arc(barX + 34 * scale, barY + barH / 2, 9 * scale, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.font = `600 ${30 * scale}px ${FONT_STACK}`;
+  ctx.fillStyle = "#e8ecf7";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.lineWidth = 0;
+  ctx.fillText(site.domain, barX + 60 * scale, barY + barH / 2);
+}
+
 function drawPhoto(ctx, bitmap, zoom, W, H) {
   const { width: iw, height: ih } = bitmap;
 
@@ -374,18 +428,27 @@ function drawBrandBackdrop(ctx, plan, W, H) {
   ctx.restore();
 }
 
-function drawScrim(ctx, W, H) {
-  const top = ctx.createLinearGradient(0, 0, 0, H * 0.25);
-  top.addColorStop(0, "rgba(0,0,0,0.58)");
+/**
+ * Voiles de lisibilité. Sur une page réelle, souvent claire, le texte blanc
+ * disparaîtrait sans un assombrissement nettement plus marqué.
+ */
+function drawScrim(ctx, W, H, strong = false) {
+  if (strong) {
+    ctx.fillStyle = "rgba(8,12,22,0.26)";
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  const top = ctx.createLinearGradient(0, 0, 0, H * (strong ? 0.32 : 0.25));
+  top.addColorStop(0, strong ? "rgba(6,10,20,0.84)" : "rgba(0,0,0,0.58)");
   top.addColorStop(1, "rgba(0,0,0,0)");
   ctx.fillStyle = top;
-  ctx.fillRect(0, 0, W, H * 0.25);
+  ctx.fillRect(0, 0, W, H * (strong ? 0.32 : 0.25));
 
-  const bottom = ctx.createLinearGradient(0, H * 0.59, 0, H);
+  const bottom = ctx.createLinearGradient(0, H * 0.56, 0, H);
   bottom.addColorStop(0, "rgba(0,0,0,0)");
-  bottom.addColorStop(1, "rgba(0,0,0,0.72)");
+  bottom.addColorStop(1, strong ? "rgba(6,10,20,0.88)" : "rgba(0,0,0,0.72)");
   ctx.fillStyle = bottom;
-  ctx.fillRect(0, H * 0.59, W, H * 0.41);
+  ctx.fillRect(0, H * 0.56, W, H * 0.44);
 }
 
 function drawChips(ctx, plan, site, position, total, W) {
@@ -438,24 +501,23 @@ export function drawFrame(ctx, context, elapsed) {
   // L'ouverture et la conclusion montrent le site lui-même ; entre les deux,
   // ses visuels occupent tout le cadre.
   const asWindow = scene.role !== "body" || (!scene.bitmap && (screenshot || hero));
+  // Page réelle plein cadre : le titre passe sous la barre d'adresse.
+  const pageFull = asWindow && Boolean(screenshot);
   const illustration = scene.bitmap ?? (asWindow ? null : (hero ?? screenshot));
 
-  if (asWindow) {
-    if (screenshot) {
-      drawPhoto(ctx, screenshot, 1.06, W, H);
-      ctx.fillStyle = "rgba(6,10,20,0.55)";
-      ctx.fillRect(0, 0, W, H);
-    } else {
-      drawBrandBackdrop(ctx, plan, W, H);
-    }
-    drawSiteWindow(ctx, { screenshot, site, plan, progress, W, H, hero });
+  if (asWindow && screenshot) {
+    drawSitePage(ctx, screenshot, site, plan, progress, W, H);
+  } else if (asWindow) {
+    // Sans capture, la page est reconstituée avec le vrai visuel et les vrais textes.
+    drawBrandBackdrop(ctx, plan, W, H);
+    drawSiteWindow(ctx, { screenshot: null, site, plan, progress, W, H, hero });
   } else if (illustration) {
     drawPhoto(ctx, illustration, scene.index % 2 === 0 ? 1 + 0.12 * progress : 1.12 - 0.12 * progress, W, H);
   } else {
     drawBrandBackdrop(ctx, plan, W, H);
   }
 
-  drawScrim(ctx, W, H);
+  drawScrim(ctx, W, H, pageFull);
   drawChips(ctx, plan, site, position, total, W);
 
   ctx.textBaseline = "alphabetic";
@@ -472,7 +534,7 @@ export function drawFrame(ctx, context, elapsed) {
     ctx.fillStyle = "#fff";
     drawWrapped(ctx, scene.onScreenText, {
       x: W / 2,
-      y: asWindow ? H * 0.105 : 300 * scale,
+      y: pageFull ? 344 * scale : asWindow ? H * 0.105 : 300 * scale,
       maxWidth: W * 0.86,
       lineHeight: fontSize * 1.14,
     });

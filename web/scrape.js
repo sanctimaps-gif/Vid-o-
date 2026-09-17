@@ -632,24 +632,75 @@ export async function loadImages(site, { limit = 10, onProgress } = {}) {
   return loaded;
 }
 
+/* ------------------------------------------------------------------ *
+ * Capture de la page réelle
+ * ------------------------------------------------------------------ */
+
+/** Services de capture gratuits et sans compte, essayés de front. */
+const SHOT_SERVICES = [
+  (url, width) => `https://s.wordpress.com/mshots/v1/${encodeURIComponent(url)}?w=${width}&h=${Math.round(width * 2.2)}`,
+  (url, width) => `https://image.thum.io/get/width/${width}/noanimate/${url}`,
+  (url, width) =>
+    `https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&meta=false` +
+    `&embed=screenshot.url&viewport.width=${width}&viewport.height=${Math.round(width * 2)}&type=jpeg`,
+];
+
 /**
- * Capture de la page réelle, par le service gratuit de WordPress.
- * C'est un bonus : s'il ne répond pas, la vidéo se rabat sur une page reconstituée.
+ * Une capture encore en préparation revient sous forme de rectangle presque uni.
+ * Elle a la bonne taille : seule la variété des pixels permet de la reconnaître.
  */
-export async function siteScreenshot(url, { width = 720, timeout = 18000 } = {}) {
-  const shot = `https://s.wordpress.com/mshots/v1/${encodeURIComponent(url)}?w=${width}`;
+function looksBlank(bitmap) {
   try {
-    const bitmap = await withTimeout(
-      fetch(shot).then(async (response) => {
-        if (!response.ok) throw new Error(`capture : réponse ${response.status}`);
-        return createImageBitmap(await response.blob());
-      }),
-      timeout,
-      "capture",
-    );
-    // Le service renvoie parfois une image d'attente presque vide : on la refuse.
-    return bitmap.width >= 320 && bitmap.height >= 320 ? bitmap : null;
+    const size = 24;
+    const probe = document.createElement("canvas");
+    probe.width = size;
+    probe.height = size;
+    const ctx = probe.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(bitmap, 0, 0, size, size);
+    const { data } = ctx.getImageData(0, 0, size, size);
+
+    let sum = 0;
+    let sumSquares = 0;
+    const count = size * size;
+    for (let offset = 0; offset < data.length; offset += 4) {
+      const luminance = 0.299 * data[offset] + 0.587 * data[offset + 1] + 0.114 * data[offset + 2];
+      sum += luminance;
+      sumSquares += luminance * luminance;
+    }
+    const mean = sum / count;
+    const variance = sumSquares / count - mean * mean;
+    // Une vraie page contient du texte et des images : son écart-type dépasse largement 6.
+    return Math.sqrt(Math.max(0, variance)) < 6;
   } catch {
-    return null;
+    return false;
   }
+}
+
+async function tryShot(service, url, width, timeout) {
+  // On passe par la chaîne de transport habituelle : le canvas doit rester
+  // exploitable, et certains services ne renvoient pas d'en-tête d'autorisation.
+  const bitmap = await fetchRemote(service(url, width), { as: "image", timeout, sticky: false });
+  if (bitmap.width < 320 || bitmap.height < 320) throw new Error("capture trop petite");
+  if (looksBlank(bitmap)) throw new Error("capture encore en préparation");
+  return bitmap;
+}
+
+/**
+ * Capture de la page réelle. Les services gratuits fabriquent l'image à la demande :
+ * la première réponse est souvent une image d'attente, d'où la seconde tentative.
+ * C'est un bonus — sans capture, la vidéo montre une page reconstituée.
+ */
+export async function siteScreenshot(url, { width = 720, timeout = 20000, onProgress } = {}) {
+  for (const attempt of [0, 1]) {
+    if (attempt > 0) {
+      onProgress?.("capture en préparation, seconde tentative");
+      await new Promise((resolve) => setTimeout(resolve, 6000));
+    }
+    try {
+      return await Promise.any(SHOT_SERVICES.map((service) => tryShot(service, url, width, timeout)));
+    } catch {
+      /* aucun service n'a encore d'image utilisable */
+    }
+  }
+  return null;
 }
