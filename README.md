@@ -180,6 +180,7 @@ polices.
 | Musique de fond | aucune par défaut ; votre fichier, ou une composition à la demande | vos fichiers dans `assets/music/` |
 | Suivi de la consigne | mots-clés de la consigne, ou un vrai modèle avec une clé gratuite | rédacteur intégré, Ollama, paliers gratuits, Claude |
 | Page du site à l'écran | capture réelle plein écran qui défile, sinon page reconstituée | visuels du site |
+| Illustration | visuels du site, complétés par vos propres images si vous en ajoutez | visuels du site |
 | Sortie | MP4 ou WebM selon le navigateur | MP4 H.264/AAC |
 | Pendant le montage | continue en arrière-plan, écran maintenu allumé | c'est un programme, rien à surveiller |
 | Rédacteur | intégré | intégré, Ollama, paliers gratuits, Claude |

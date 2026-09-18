@@ -313,6 +313,32 @@ function fallbackSubjects(site, total, brief) {
   ];
 }
 
+/**
+ * Donne un visuel aux scènes qui n'en ont pas. Sans cela, une scène dont le
+ * rédacteur n'a pas su choisir l'image tombait sur un fond uni, alors que des
+ * visuels étaient disponibles. Les images fournies par l'utilisateur passent
+ * devant : elles ont été ajoutées exprès.
+ */
+export function illustrateScenes(plan, site) {
+  const available = site.images.filter((image) => image.bitmap);
+  if (available.length === 0) return plan;
+
+  const pool = [
+    ...available.filter((image) => image.fromUser),
+    ...available.filter((image) => !image.fromUser),
+  ];
+  let cursor = 0;
+
+  for (const video of plan.videos) {
+    for (const scene of video.scenes) {
+      if (scene.role !== "body" || scene.imageIndex >= 0) continue;
+      scene.imageIndex = pool[cursor % pool.length].index;
+      cursor += 1;
+    }
+  }
+  return plan;
+}
+
 export function writeCampaign(site, brief, count) {
   const lang = detectLang(site, brief);
   const book = PHRASES[lang];

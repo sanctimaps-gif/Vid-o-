@@ -196,9 +196,30 @@ function absoluteUrl(candidate, base) {
   }
 }
 
+/** Dans un `srcset`, on veut la plus grande variante, déclarée par son descripteur. */
 function bestFromSrcset(srcset) {
-  const parts = srcset.split(",").map((entry) => entry.trim().split(/\s+/)[0]).filter(Boolean);
-  return parts.length > 0 ? parts[parts.length - 1] : null;
+  let best = null;
+  let bestWidth = -1;
+  for (const entry of srcset.split(",")) {
+    const [url, descriptor] = entry.trim().split(/\s+/);
+    if (!url) continue;
+    const width = /^(\d+)w$/.exec(descriptor ?? "")?.[1];
+    const value = width ? Number(width) : 0;
+    if (value >= bestWidth) {
+      bestWidth = value;
+      best = url;
+    }
+  }
+  return best;
+}
+
+/** Images posées en fond par la feuille de style : très courant pour les bandeaux. */
+function backgroundUrls(text) {
+  const found = [];
+  for (const match of String(text ?? "").matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/gi)) {
+    if (match[1] && !match[1].startsWith("data:")) found.push(match[1]);
+  }
+  return found;
 }
 
 function flattenJsonLd(node, out = []) {
@@ -285,6 +306,24 @@ function extractPage(html, pageUrl) {
   };
 
   pushImage(meta('meta[property="og:image"]'), title);
+  pushImage(meta('meta[name="twitter:image"]'), title);
+
+  for (const link of doc.querySelectorAll('link[rel="preload"][as="image"], link[rel="image_src"]')) {
+    pushImage(link.getAttribute("href") ?? link.getAttribute("imagesrcset")?.split(",")[0]?.trim(), title);
+  }
+
+  // Fonds déclarés en style, dans l'attribut des balises comme dans les feuilles internes.
+  for (const node of doc.querySelectorAll("[style*=url]")) {
+    for (const found of backgroundUrls(node.getAttribute("style"))) pushImage(found, title);
+  }
+  for (const sheet of doc.querySelectorAll("style")) {
+    for (const found of backgroundUrls(sheet.textContent).slice(0, 12)) pushImage(found, title);
+  }
+
+  for (const source of doc.querySelectorAll("picture source[srcset]")) {
+    pushImage(bestFromSrcset(source.getAttribute("srcset") ?? ""), title);
+  }
+
   for (const img of doc.querySelectorAll("img")) {
     const srcset = img.getAttribute("srcset") ?? img.getAttribute("data-srcset");
     pushImage(
@@ -554,6 +593,35 @@ export async function crawlSite(startUrl, { maxPages = 6, onProgress } = {}) {
     rawProducts.push(...fetched.filter(Boolean));
   }
 
+  // Trop peu de visuels : on explore quelques pages de plus, en privilégiant
+  // celles qui ressemblent à une galerie. Un site se raconte avec ses images.
+  const harvested = [...home.images];
+  if (harvested.length < 6) {
+    const GALLERY = /(galerie|gallery|photos?|portfolio|realisation|réalisation|projets?|works?|about|propos)/i;
+    const extra = [...new Set(home.links)]
+      .filter((link) => {
+        try {
+          const parsed = new URL(link);
+          return parsed.origin === origin && !PRODUCT_PATH.test(parsed.pathname);
+        } catch {
+          return false;
+        }
+      })
+      .sort((a, b) => Number(GALLERY.test(b)) - Number(GALLERY.test(a)))
+      .slice(0, 4);
+
+    for (const [index, link] of extra.entries()) {
+      onProgress?.(`recherche de visuels ${index + 1}/${extra.length}`);
+      try {
+        const page = extractPage(await fetchRemote(link, { timeout: 12000 }), link);
+        harvested.push(...page.images);
+      } catch {
+        /* page inaccessible : on continue */
+      }
+      if (harvested.length >= 12) break;
+    }
+  }
+
   // Banque d'images indexée, sans doublon.
   const images = [];
   const seen = new Set();
@@ -573,7 +641,7 @@ export async function crawlSite(startUrl, { maxPages = 6, onProgress } = {}) {
   for (const product of rawProducts) {
     for (const image of product.images) addImage(image.url, image.alt, product.title);
   }
-  for (const image of home.images) addImage(image.url, image.alt, home.title || start.hostname);
+  for (const image of harvested) addImage(image.url, image.alt, home.title || start.hostname);
 
   const products = rawProducts
     .filter((product) => product.title.length > 1)
@@ -608,7 +676,7 @@ export async function crawlSite(startUrl, { maxPages = 6, onProgress } = {}) {
 }
 
 /** Télécharge les visuels et les décode. Une image illisible est simplement écartée. */
-export async function loadImages(site, { limit = 10, onProgress } = {}) {
+export async function loadImages(site, { limit = 14, onProgress } = {}) {
   let loaded = 0;
   let tried = 0;
 

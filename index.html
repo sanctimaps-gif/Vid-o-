@@ -94,6 +94,16 @@
         </div>
 
         <div class="field">
+          <label for="photos">Vos propres images (facultatif)</label>
+          <input id="photos" name="photos" type="file" accept="image/*" multiple />
+          <p class="hint" id="photos-label">
+            Vid-O illustre d'abord avec les images trouvées sur votre site. Celles que vous ajoutez
+            ici viennent compléter, et servent de secours quand votre hébergeur empêche un
+            navigateur de lire vos visuels.
+          </p>
+        </div>
+
+        <div class="field">
           <label for="apikey">Clé d'un modèle gratuit (facultatif)</label>
           <input
             id="apikey"
@@ -150,7 +160,9 @@
           <li>
             <strong>Lecture du site.</strong> Vid-O ouvre votre page, repère les fiches produit —
             catalogue Shopify, données structurées, liens de boutique — et en tire les noms, les
-            prix, les descriptions et les photos.
+            prix, les descriptions et les photos. Les visuels sont cherchés partout : balises
+            images, <code>srcset</code>, fonds déclarés en style, et sur vos autres pages quand la
+            première en donne peu.
           </li>
           <li>
             <strong>Écriture.</strong> Votre consigne décide du sujet : les mots qu'elle contient

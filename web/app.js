@@ -6,7 +6,7 @@ import {
   resetTransport,
   siteScreenshot,
 } from "./scrape.js";
-import { writeCampaign, requestedCount } from "./writer.js";
+import { writeCampaign, requestedCount, illustrateScenes } from "./writer.js";
 import { isSupported, renderVideo } from "./render.js";
 import { MOOD_NAMES } from "./audio.js";
 import { providerForKey, writeWithModel } from "./llm.js";
@@ -92,6 +92,28 @@ $("#music").addEventListener("change", async (event) => {
   } catch {
     $("#music-label").textContent = "Fichier audio illisible, il sera ignoré.";
   }
+});
+
+/* ------------------------------------------------------------------ *
+ * Images fournies par l'utilisateur
+ * ------------------------------------------------------------------ */
+
+let ownImages = [];
+
+$("#photos").addEventListener("change", async (event) => {
+  const files = [...(event.target.files ?? [])];
+  ownImages = [];
+  for (const file of files.slice(0, 12)) {
+    try {
+      ownImages.push({ bitmap: await createImageBitmap(file), name: file.name });
+    } catch {
+      /* fichier illisible : on l'ignore */
+    }
+  }
+  $("#photos-label").textContent =
+    ownImages.length > 0
+      ? `${ownImages.length} image(s) ajoutée(s), elles illustreront les vidéos.`
+      : "Aucune image exploitable dans cette sélection.";
 });
 
 // La clé reste sur l'appareil : elle n'est envoyée qu'au fournisseur choisi.
@@ -289,8 +311,33 @@ form.addEventListener("submit", async (event) => {
     const loaded = await loadImages(site, {
       onProgress: (message) => say(`Visuels — ${message}`),
     });
-    stage("téléchargement des visuels", `${loaded} retenu(s)`);
-    say(`${loaded} visuel(s) exploitable(s). Écriture des scripts…`);
+    // Les images fournies rejoignent la banque, à la suite de celles du site :
+    // les index déjà associés aux produits restent valables.
+    for (const own of ownImages) {
+      site.images.push({
+        index: site.images.length,
+        url: own.name,
+        alt: own.name,
+        source: "vos images",
+        bitmap: own.bitmap,
+        fromUser: true,
+      });
+    }
+
+    const total = loaded + ownImages.length;
+    stage(
+      "téléchargement des visuels",
+      `${loaded} du site${ownImages.length > 0 ? ` + ${ownImages.length} fournie(s)` : ""}`,
+    );
+    say(`${total} visuel(s) exploitable(s). Écriture des scripts…`);
+
+    if (total === 0) {
+      warn(
+        "Aucun visuel n'a pu être récupéré sur ce site : les vidéos seront illustrées par la page " +
+          "elle-même et par vos couleurs. Ajoutez vos propres images dans le formulaire pour un " +
+          "rendu nettement plus riche.",
+      );
+    }
 
     const requested = Number(data.get("count"));
     const wanted = Number.isFinite(requested) && requested > 0 ? requested : requestedCount(brief);
@@ -317,6 +364,7 @@ form.addEventListener("submit", async (event) => {
       }
     }
     if (!plan) plan = writeCampaign(site, brief, wanted);
+    illustrateScenes(plan, site);
     stage("écriture des scripts", `${plan.videos.length} vidéo(s), par ${writtenBy}`);
     const via = preferredSource();
     say(`${plan.videos.length} vidéo(s) à monter pour ${plan.brandName}${via ? ` (lu via ${via})` : ""}.`);
@@ -384,6 +432,8 @@ form.addEventListener("submit", async (event) => {
     showReport(
       site,
       [
+        `visuels : ${site.images.filter((image) => image.bitmap && !image.fromUser).length} du site` +
+          `${ownImages.length > 0 ? `, ${ownImages.length} fournie(s) par vous` : ""}`,
         `scripts : ${writtenBy}`,
         `musique : ${chosenMood === "none" ? "aucune" : chosenMood === "file" ? "votre fichier" : `composée (${mood})`}`,
         `capture de la page : ${screenshot ? "obtenue" : "indisponible"}`,
