@@ -32,6 +32,16 @@ const PHRASES = {
       "Il y a de quoi faire ici, on vous montre.",
     ],
     siteHookTexts: ["A DECOUVRIR", "LE TOUR DU PROPRIETAIRE", "CA SE PASSE ICI", "REGARDEZ CA", "TRENTE SECONDES"],
+    // Un site bati autour d'une carte ne se raconte pas comme une page : ce qu'on y
+    // fait, c'est parcourir, chercher, zoomer. Les accroches le disent.
+    mapHooks: [
+      "Ouvrez la carte, et laissez-vous guider.",
+      "Tout est sur la carte. Il n'y a plus qu'a explorer.",
+      "On vous montre comment s'y reperer en trente secondes.",
+      "Zoomez, deplacez-vous, cliquez : tout est la.",
+      "Une carte, et tout ce qu'il y a autour de vous.",
+    ],
+    mapHookTexts: ["OUVREZ LA CARTE", "A EXPLORER", "TOUT EST SUR LA CARTE", "ZOOMEZ", "REPEREZ-VOUS"],
     siteTitle: (brand) => `${brand}, en trente secondes #Shorts`,
     siteSeriesTitle: (position, total, topic, brand) => `${position}/${total} — ${topic} | ${brand} #Shorts`,
     priceLine: (price) => `Elle est affichee a ${price} sur le site.`,
@@ -75,6 +85,14 @@ const PHRASES = {
       "There is a lot here. Let us show you.",
     ],
     siteHookTexts: ["TAKE A LOOK", "THE FULL TOUR", "IT HAPPENS HERE", "LOOK AT THIS", "THIRTY SECONDS"],
+    mapHooks: [
+      "Open the map and let it guide you.",
+      "It is all on the map. All you have to do is explore.",
+      "Thirty seconds and you will know your way around.",
+      "Zoom, pan, click: it is all there.",
+      "One map, and everything around you.",
+    ],
+    mapHookTexts: ["OPEN THE MAP", "GO EXPLORE", "IT IS ALL ON THE MAP", "ZOOM IN", "FIND YOUR WAY"],
     siteTitle: (brand) => `${brand}, in thirty seconds #Shorts`,
     siteSeriesTitle: (position, total, topic, brand) => `${position}/${total} — ${topic} | ${brand} #Shorts`,
     priceLine: (price) => `It is listed at ${price} on the site.`,
@@ -302,6 +320,12 @@ function fallbackSubjects(site, total, brief) {
 
   // Aucun titre exploitable : une seule vidéo, construite sur la présentation du site.
   const pitch = [site.description, site.pageText].filter(Boolean).join(" ").slice(0, 600);
+  // Un site bâti autour d'une carte n'a souvent ni titre de section ni texte : tout
+  // se joue à l'écran. Ce n'est pas une raison pour abandonner — la visite, elle,
+  // a bien des images à montrer.
+  if (!site.title && !pitch && site.interactive) {
+    return [{ title: site.siteName, url: site.url, description: "", imageIndexes: share(0) }];
+  }
   if (!site.title && !pitch) return [];
   return [
     {
@@ -381,10 +405,21 @@ export function writeCampaign(site, brief, count) {
     const available = (product.imageIndexes ?? []).filter((i) => usable.has(i));
     const image = (position) => (available.length > 0 ? pick(available, position) : -1);
 
+    // Accroches : celles de la carte quand le site en est une, sinon celles du
+    // site ou celles du produit.
+    const hooks =
+      kind !== "site" ? book.hooks : site.interactive === "carte" ? book.mapHooks : book.siteHooks;
+    const hookTexts =
+      kind !== "site"
+        ? book.hookTexts
+        : site.interactive === "carte"
+          ? book.mapHookTexts
+          : book.siteHookTexts;
+
     const scenes = [
       {
-        narration: pick(kind === "site" ? book.siteHooks : book.hooks, index),
-        onScreenText: pick(kind === "site" ? book.siteHookTexts : book.hookTexts, index),
+        narration: pick(hooks, index),
+        onScreenText: pick(hookTexts, index),
         imageIndex: image(0),
         role: "hook",
       },

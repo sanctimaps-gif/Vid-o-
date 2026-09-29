@@ -71,6 +71,20 @@ Réponds uniquement par un objet JSON de cette forme, sans texte autour :
 function describeSite(site) {
   const lines = [`URL : ${site.url}`, `Nom : ${site.siteName}`, `Titre : ${site.title}`];
   if (site.description) lines.push(`Description : ${site.description}`);
+  // Ce que le rédacteur ne devinerait pas du texte : l'essentiel du site est à
+  // l'écran, pas dans la page. Il doit en parler comme d'un outil qu'on manipule.
+  if (site.interactive === "carte") {
+    lines.push(
+      "Particularité : ce site est bâti autour d'une carte interactive que l'on explore " +
+        "(déplacement, zoom, repères cliquables). Les vidéos montrent cette carte à l'écran : " +
+        "parle de ce qu'on peut y chercher et y trouver, sans inventer de lieu ni de donnée précise.",
+    );
+  } else if (site.interactive === "application") {
+    lines.push(
+      "Particularité : ce site se construit dans le navigateur ; son contenu visible tient surtout " +
+        "à l'écran. Les vidéos le montrent en fonctionnement.",
+    );
+  }
   lines.push("");
 
   if (site.products.length > 0) {

@@ -33,12 +33,18 @@ out/ma-boutique-fr-2026-09-091132/
 1. **Lecture du site.** Vid-O explore votre site : catalogue Shopify ou WooCommerce quand il y en a
    un, sinon les fiches produit trouvées depuis la page d'accueil. Il en tire les noms, les prix,
    les descriptions et les photos, et respecte votre `robots.txt`.
-2. **Écriture.** Le rédacteur reçoit votre consigne et ce qui a été extrait, puis écrit une campagne
+2. **Visite du site** (page navigateur). Vid-O photographie la page d'accueil, puis deux autres
+   pages du site : la vidéo suit ce parcours, adresse affichée à l'écran. Quand la page se
+   construit toute seule après son affichage — **carte interactive**, application JavaScript —
+   il le reconnaît et attend qu'elle ait fini : il mesure sur la capture elle-même si la carte
+   est dessinée, et redemande plus tard tant qu'elle ne l'est pas. Sans cela on filmerait le
+   cadre vide qui précède la carte. C'est quelques dizaines de secondes de plus, une seule fois.
+3. **Écriture.** Le rédacteur reçoit votre consigne et ce qui a été extrait, puis écrit une campagne
    complète : accroche, scènes, voix off, textes incrustés, titre et description YouTube. Il choisit
    quelle photo du site illustre quelle scène, et n'a pas le droit d'inventer un prix ou une
    caractéristique produit qui ne figure pas dans les données extraites. Voir « Le rédacteur » plus
    bas pour choisir lequel.
-3. **Fabrication.** La vidéo s'ouvre sur votre page réelle, dans une fenêtre de navigateur qui
+4. **Fabrication.** La vidéo s'ouvre sur votre page réelle, dans une fenêtre de navigateur qui
    défile, puis enchaîne vos visuels plein cadre en 1080x1920 : léger zoom, sous-titres calés sur la
    voix off, votre couleur de marque, une barre de progression, et votre nom de domaine affiché en
    permanence. Voix off, musique et normalisation du son sont assemblées, puis le tout est encodé
@@ -179,7 +185,7 @@ polices.
 | Voix off | oui, par un service de synthèse gratuit ; sous-titres seuls s'il ne répond pas | oui, edge-tts, meilleure qualité |
 | Musique de fond | aucune par défaut ; votre fichier, ou une composition à la demande | vos fichiers dans `assets/music/` |
 | Suivi de la consigne | mots-clés de la consigne, ou un vrai modèle avec une clé gratuite | rédacteur intégré, Ollama, paliers gratuits, Claude |
-| Page du site à l'écran | capture réelle plein écran qui défile, sinon page reconstituée | visuels du site |
+| Page du site à l'écran | trois pages capturées, plein écran, qui défilent ; attente du chargement sur les sites à carte | visuels du site |
 | Illustration | visuels du site, complétés par vos propres images si vous en ajoutez | visuels du site |
 | Sortie | MP4 ou WebM selon le navigateur | MP4 H.264/AAC |
 | Pendant le montage | continue en arrière-plan, écran maintenu allumé | c'est un programme, rien à surveiller |
@@ -194,8 +200,13 @@ suivent la même charte visuelle.
 - Il ne publie pas à votre place : les fichiers sont produits, la mise en ligne reste manuelle.
 - Il n'invente pas d'images. S'il n'y a aucune photo exploitable sur le site, les scènes sont
   fabriquées sur un fond aux couleurs de la marque.
-- La capture de votre page est demandée à trois services gratuits en parallèle. Ils fabriquent
+- La capture de vos pages est demandée à des services gratuits en parallèle. Ils fabriquent
   l'image à la demande et répondent souvent d'abord une image d'attente : Vid-O la reconnaît à son
-  uniformité, la refuse et redemande. Si aucun n'aboutit, la vidéo montre une page reconstituée
-  avec vos vrais textes et visuels.
+  uniformité, la refuse et redemande. Sur un site à carte, seuls les services capables d'attendre
+  avant de déclencher sont interrogés, et Vid-O vérifie sur l'image que la carte est dessinée
+  avant de l'accepter. Si aucun n'aboutit, la vidéo montre une page reconstituée avec vos vrais
+  textes et visuels.
+- Il ne clique pas à votre place. Il ouvre les pages et attend qu'elles soient dessinées ; il ne
+  déroule pas un menu, ne remplit pas un formulaire et n'entre pas dans une zone qui demande une
+  connexion.
 - Relisez toujours les scripts avant publication : ce sont vos allégations commerciales.

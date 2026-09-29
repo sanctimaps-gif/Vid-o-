@@ -60,6 +60,25 @@ const READER = { id: "lecteur", url: (u) => `https://r.jina.ai/${u}` };
 const PRODUCT_PATH = /\/(products?|produits?|shop|boutique|item|articles?|collections?\/[^/]+\/products)\//i;
 const SKIP_IMAGE = /(sprite|icon|favicon|placeholder|pixel|badge|payment|paypal|visa|mastercard|flag|\.svg|\.gif)/i;
 
+/**
+ * Bibliothèques de carte interactive, et les marques qu'elles laissent dans la page.
+ *
+ * Une page qui charge une carte n'est pas finie quand son HTML arrive : le fond de
+ * carte, les tuiles et les repères sont demandés ensuite, et mettent plusieurs
+ * secondes. La capturer tout de suite ne donne qu'un rectangle vide à la place de
+ * la carte — exactement ce qu'il ne faut pas montrer dans une vidéo.
+ */
+const MAP_MARKERS =
+  /(leaflet|mapbox|maplibre|openlayers|\bol\.js\b|google\.[a-z.]+\/maps|maps\.googleapis|deck\.gl|cesium|arcgis|\bumap\b|tilelayer|tileserver|tile\.openstreetmap|basemap|id=["']map["']|class=["'][^"']*\bmap(-container|box)?\b)/i;
+
+const MAP_WORDS = /\b(carte|cartes|map|maps|plan interactif|geoportail|géoportail|itinéraire|itineraire)\b/i;
+
+export function looksLikeMap(html) {
+  return MAP_MARKERS.test(String(html ?? ""));
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export class ReadFailure extends Error {
   constructor(message, reasons) {
     super(message);
@@ -528,9 +547,14 @@ export async function crawlSite(startUrl, { maxPages = 6, onProgress } = {}) {
     }
   }
 
+  // Le site se charge-t-il tout seul après l'arrivée du HTML ? La réponse décide du
+  // temps qu'on laissera à la page avant de la photographier.
+  let interactive = looksLikeMap(rawHtml) ? "carte" : null;
+
   // Une page qui ne livre presque rien est le plus souvent construite en JavaScript :
   // le lecteur, lui, l'exécute avant de répondre.
   if (isThin(home)) {
+    interactive ??= "application";
     onProgress?.("page presque vide, relecture via le lecteur");
     try {
       const markdown = await withTimeout(
@@ -547,6 +571,10 @@ export async function crawlSite(startUrl, { maxPages = 6, onProgress } = {}) {
       /* le lecteur n'a rien donné : on garde ce qu'on a */
     }
   }
+
+  // Le lecteur a rendu la page en Markdown : les marques de bibliothèque ont disparu,
+  // mais le vocabulaire de la page trahit encore la carte.
+  if (!interactive && MAP_WORDS.test(`${home.title} ${home.description}`)) interactive = "carte";
 
   let rawProducts = [];
   if (looksLikeShopify(rawHtml)) rawProducts = await tryShopify(origin, onProgress);
@@ -672,6 +700,8 @@ export async function crawlSite(startUrl, { maxPages = 6, onProgress } = {}) {
     products,
     images,
     readVia,
+    interactive,
+    links: [...new Set(home.links)],
   };
 }
 
@@ -701,17 +731,54 @@ export async function loadImages(site, { limit = 14, onProgress } = {}) {
 }
 
 /* ------------------------------------------------------------------ *
- * Capture de la page réelle
+ * Visite du site : on le parcourt comme un visiteur avant de le filmer
  * ------------------------------------------------------------------ */
 
-/** Services de capture gratuits et sans compte, essayés de front. */
+/**
+ * Services de capture gratuits et sans compte.
+ *
+ * `patient` marque ceux qui savent attendre avant de déclencher : on leur dit
+ * combien de secondes laisser à la page. C'est ce qui permet de photographier une
+ * carte une fois ses tuiles arrivées, et non le cadre vide qui la précède.
+ */
 const SHOT_SERVICES = [
-  (url, width) => `https://s.wordpress.com/mshots/v1/${encodeURIComponent(url)}?w=${width}&h=${Math.round(width * 2.2)}`,
-  (url, width) => `https://image.thum.io/get/width/${width}/noanimate/${url}`,
-  (url, width) =>
-    `https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&meta=false` +
-    `&embed=screenshot.url&viewport.width=${width}&viewport.height=${Math.round(width * 2)}&type=jpeg`,
+  {
+    id: "thum.io",
+    patient: true,
+    url: (url, width, wait) =>
+      `https://image.thum.io/get/width/${width}/wait/${Math.min(20, Math.max(1, Math.round(wait)))}/noanimate/${url}`,
+  },
+  {
+    id: "microlink",
+    patient: true,
+    url: (url, width, wait) =>
+      `https://api.microlink.io/?url=${encode(url)}&screenshot=true&meta=false&embed=screenshot.url` +
+      `&viewport.width=${width}&viewport.height=${Math.round(width * 2)}&type=jpeg` +
+      `&waitUntil=networkidle0&waitFor=${Math.min(25000, Math.round(wait * 1000))}`,
+  },
+  {
+    id: "mshots",
+    patient: false,
+    url: (url, width) => `https://s.wordpress.com/mshots/v1/${encode(url)}?w=${width}&h=${Math.round(width * 2.2)}`,
+  },
 ];
+
+/** Vignette en niveaux de gris : la matière des deux mesures qui suivent. */
+function thumbnail(bitmap, size) {
+  const probe = document.createElement("canvas");
+  probe.width = size;
+  probe.height = size;
+  const ctx = probe.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(bitmap, 0, 0, size, size);
+  const { data } = ctx.getImageData(0, 0, size, size);
+
+  const values = new Float32Array(size * size);
+  for (let cell = 0; cell < values.length; cell += 1) {
+    const offset = cell * 4;
+    values[cell] = 0.299 * data[offset] + 0.587 * data[offset + 1] + 0.114 * data[offset + 2];
+  }
+  return values;
+}
 
 /**
  * Une capture encore en préparation revient sous forme de rectangle presque uni.
@@ -719,24 +786,15 @@ const SHOT_SERVICES = [
  */
 function looksBlank(bitmap) {
   try {
-    const size = 24;
-    const probe = document.createElement("canvas");
-    probe.width = size;
-    probe.height = size;
-    const ctx = probe.getContext("2d", { willReadFrequently: true });
-    ctx.drawImage(bitmap, 0, 0, size, size);
-    const { data } = ctx.getImageData(0, 0, size, size);
-
+    const values = thumbnail(bitmap, 24);
     let sum = 0;
     let sumSquares = 0;
-    const count = size * size;
-    for (let offset = 0; offset < data.length; offset += 4) {
-      const luminance = 0.299 * data[offset] + 0.587 * data[offset + 1] + 0.114 * data[offset + 2];
-      sum += luminance;
-      sumSquares += luminance * luminance;
+    for (const value of values) {
+      sum += value;
+      sumSquares += value * value;
     }
-    const mean = sum / count;
-    const variance = sumSquares / count - mean * mean;
+    const mean = sum / values.length;
+    const variance = sumSquares / values.length - mean * mean;
     // Une vraie page contient du texte et des images : son écart-type dépasse largement 6.
     return Math.sqrt(Math.max(0, variance)) < 6;
   } catch {
@@ -744,31 +802,261 @@ function looksBlank(bitmap) {
   }
 }
 
-async function tryShot(service, url, width, timeout) {
-  // On passe par la chaîne de transport habituelle : le canvas doit rester
-  // exploitable, et certains services ne renvoient pas d'en-tête d'autorisation.
-  const bitmap = await fetchRemote(service(url, width), { as: "image", timeout, sticky: false });
-  if (bitmap.width < 320 || bitmap.height < 320) throw new Error("capture trop petite");
-  if (looksBlank(bitmap)) throw new Error("capture encore en préparation");
-  return bitmap;
+/**
+ * Densité de détail : la part de l'image où la teinte change d'un point au suivant.
+ *
+ * Une carte chargée est faite de routes, d'étiquettes et de reliefs : elle change
+ * partout. Le même cadre avant l'arrivée des tuiles est un aplat, avec du détail
+ * seulement dans l'en-tête du site. C'est ce qui distingue « la carte est là » de
+ * « la carte se charge encore », alors que les deux images ont la même taille.
+ */
+function pageDetail(bitmap) {
+  try {
+    const size = 40;
+    const values = thumbnail(bitmap, size);
+    let textured = 0;
+    let pairs = 0;
+    for (let y = 0; y < size; y += 1) {
+      for (let x = 0; x < size; x += 1) {
+        const here = values[y * size + x];
+        if (x + 1 < size) {
+          pairs += 1;
+          if (Math.abs(here - values[y * size + x + 1]) > 4) textured += 1;
+        }
+        if (y + 1 < size) {
+          pairs += 1;
+          if (Math.abs(here - values[(y + 1) * size + x]) > 4) textured += 1;
+        }
+      }
+    }
+    return pairs === 0 ? 0 : textured / pairs;
+  } catch {
+    return 1;
+  }
 }
 
 /**
- * Capture de la page réelle. Les services gratuits fabriquent l'image à la demande :
- * la première réponse est souvent une image d'attente, d'où la seconde tentative.
- * C'est un bonus — sans capture, la vidéo montre une page reconstituée.
+ * En dessous, une page annoncée comme interactive n'a visiblement pas fini de se
+ * dessiner. Mesuré sur des captures : un cadre de carte encore vide tombe à 0,01,
+ * une carte dessinée monte à 0,30, et une page ordinaire très dépouillée — le pire
+ * cas honnête — reste à 0,17. Le seuil est placé entre les deux, plus près du bas :
+ * se tromper ici ne coûte qu'une attente de plus, la meilleure image obtenue étant
+ * conservée à la fin.
  */
-export async function siteScreenshot(url, { width = 720, timeout = 20000, onProgress } = {}) {
-  for (const attempt of [0, 1]) {
-    if (attempt > 0) {
-      onProgress?.("capture en préparation, seconde tentative");
-      await new Promise((resolve) => setTimeout(resolve, 6000));
+const LOADED_DETAIL = 0.09;
+
+async function tryShot(service, url, width, wait, timeout) {
+  // On passe par la chaîne de transport habituelle : le canvas doit rester
+  // exploitable, et certains services ne renvoient pas d'en-tête d'autorisation.
+  const bitmap = await fetchRemote(service.url(url, width, wait), { as: "image", timeout, sticky: false });
+  if (bitmap.width < 320 || bitmap.height < 320) throw new Error(`${service.id} : capture trop petite`);
+  if (looksBlank(bitmap)) throw new Error(`${service.id} : capture encore en préparation`);
+  return { bitmap, detail: pageDetail(bitmap), via: service.id };
+}
+
+/**
+ * Une capture d'une page. En mode patient on interroge les seuls services qui
+ * savent attendre, et on garde la plus fournie des réponses plutôt que la première :
+ * entre deux captures de la même page, celle où la carte est arrivée gagne toujours.
+ */
+async function bestShot(url, width, wait, patient) {
+  const services = SHOT_SERVICES.filter((service) => !patient || service.patient);
+  const timeout = Math.round(wait * 1000) + 22000;
+
+  if (!patient) {
+    return Promise.any(services.map((service) => tryShot(service, url, width, wait, timeout)));
+  }
+
+  const settled = await Promise.allSettled(
+    services.map((service) => tryShot(service, url, width, wait, timeout)),
+  );
+  const obtained = settled.filter((entry) => entry.status === "fulfilled").map((entry) => entry.value);
+  if (obtained.length === 0) throw new Error("aucun service n'a rendu de capture");
+  return obtained.sort((a, b) => b.detail - a.detail)[0];
+}
+
+/**
+ * Photographie une page, en lui laissant le temps de finir. Les services gratuits
+ * fabriquent l'image à la demande et répondent volontiers une image d'attente : on
+ * redemande, avec à chaque fois un délai plus long, et on garde la meilleure.
+ */
+async function capturePage(url, { width, isPatient, label, onProgress }) {
+  let best = null;
+
+  // `isPatient` est relu à chaque tour : la lecture du site peut annoncer la carte
+  // après le départ de la première capture, et le tour suivant doit en tenir compte.
+  for (let round = 0; round < 3; round += 1) {
+    const patient = isPatient();
+    // Une carte met couramment cinq à dix secondes à s'afficher : la première
+    // demande part donc déjà avec une longue attente, plutôt que de la découvrir
+    // après deux tentatives perdues.
+    const rounds = patient ? [9, 15, 20] : [2, 6];
+    if (round >= rounds.length) break;
+    const wait = rounds[round];
+
+    if (round > 0) {
+      // Deux échecs très différents, à ne pas confondre dans ce qu'on affiche :
+      // une image reçue mais encore vide, et aucune image du tout.
+      onProgress?.(
+        best
+          ? `${label} : la page n'a pas fini de se charger, on lui laisse ${wait} s de plus`
+          : `${label} : aucune capture obtenue, nouvelle tentative`,
+      );
+      await sleep(round === 1 ? 4000 : 7000);
+    } else {
+      onProgress?.(patient ? `${label} : on attend le chargement complet` : `${label} : capture`);
     }
+
     try {
-      return await Promise.any(SHOT_SERVICES.map((service) => tryShot(service, url, width, timeout)));
+      const shot = await bestShot(url, width, wait, patient);
+      if (!best || shot.detail > best.detail) best = shot;
+      // En mode ordinaire la première capture correcte suffit ; en mode patient on
+      // n'arrête que lorsque la page est visiblement dessinée.
+      if (!patient || best.detail >= LOADED_DETAIL) break;
     } catch {
-      /* aucun service n'a encore d'image utilisable */
+      /* aucun service n'a encore d'image exploitable : on retente */
     }
   }
-  return null;
+
+  // Une page qui s'annonçait interactive et qui reste un aplat après toutes les
+  // tentatives n'a jamais fini de se dessiner. Mieux vaut alors ne rien rendre :
+  // la vidéo montrera la page reconstituée, avec les vrais textes du site, plutôt
+  // qu'un rectangle gris là où la carte aurait dû être. Un site ordinaire garde en
+  // revanche sa capture, même dépouillée : elle, au moins, est fidèle.
+  if (best && isPatient() && best.detail < 0.04) return null;
+  return best;
 }
+
+/** Ce qui s'affichera dans la barre d'adresse de la vidéo : « /la-carte ». */
+function pathLabel(url) {
+  try {
+    const path = new URL(url).pathname.replace(/\/+$/, "");
+    return path && path !== "/" ? path : "";
+  } catch {
+    return "";
+  }
+}
+
+// « cart » est délimité : sans cela il attrapait « carte », et le site à filmer
+// perdait justement la page qui porte sa carte.
+const VISIT_SKIP =
+  /(mentions|legal|cgv|cgu|privacy|confidentialite|confidentialité|cookie|panier|\bcarts?\b|checkout|compte|account|login|connexion|contact|\.pdf|\.zip|\.jpe?g|\.png)/i;
+const VISIT_PREFER =
+  /(carte|map|galerie|gallery|boutique|shop|produits?|products?|collections?|decouvrir|découvrir|explorer|visite|lieux|sanctuaire|about|propos|services?)/i;
+
+/** Les pages qui valent la visite : celles qui montrent quelque chose. */
+function pagesToVisit(site, limit) {
+  const home = pathLabel(site.url);
+  const seen = new Set([home]);
+  const candidates = [];
+
+  for (const link of site.links ?? []) {
+    let parsed;
+    try {
+      parsed = new URL(link);
+    } catch {
+      continue;
+    }
+    if (parsed.origin !== site.origin) continue;
+    const path = pathLabel(link);
+    if (!path || seen.has(path) || VISIT_SKIP.test(path)) continue;
+    // Une page enterrée à quatre niveaux est rarement celle qu'on montrerait.
+    if (path.split("/").length > 4) continue;
+    seen.add(path);
+    candidates.push({ url: link, path });
+  }
+
+  return candidates
+    .sort((a, b) => Number(VISIT_PREFER.test(b.path)) - Number(VISIT_PREFER.test(a.path)))
+    .slice(0, limit);
+}
+
+/**
+ * Lance la visite du site et rend un objet qui se remplit au fur et à mesure.
+ *
+ * On commence par la page d'accueil, puis on va voir deux autres pages : la vidéo
+ * montre alors un vrai parcours, et non trois fois le même écran. La visite démarre
+ * dès que la lecture du site a dit si la page se charge toute seule — un site à
+ * carte n'est pas photographié comme une page statique — et au plus tard au bout
+ * de quatre secondes, pour ne pas retarder les sites ordinaires.
+ */
+export function startVisit(startUrl, { width = 720, pages = 2, onProgress } = {}) {
+  const shots = [];
+  const waiting = [];
+  let patient = false;
+  let kind = null;
+
+  let begin;
+  const started = new Promise((resolve) => {
+    begin = resolve;
+  });
+  const beginTimer = setTimeout(begin, 4000);
+
+  let announcePages;
+  const planned = new Promise((resolve) => {
+    announcePages = resolve;
+  });
+  const pagesTimer = setTimeout(() => announcePages([]), 15000);
+
+  const add = (shot, url, label) => {
+    if (!shot) return;
+    shots.push({ ...shot, url, label, path: pathLabel(url) });
+    for (const resolve of waiting.splice(0)) resolve(shots);
+  };
+
+  const visit = {
+    shots,
+    get patient() {
+      return patient;
+    },
+    get kind() {
+      return kind;
+    },
+
+    /** La lecture du site a abouti : elle dit ce qu'est la page, et où aller ensuite. */
+    explore(site) {
+      kind = site.interactive ?? null;
+      patient = Boolean(site.interactive);
+      clearTimeout(beginTimer);
+      clearTimeout(pagesTimer);
+      begin();
+      announcePages(pagesToVisit(site, pages));
+    },
+
+    /** Attend qu'au moins une page soit photographiée, sans dépasser `ms`. */
+    ready(ms) {
+      if (shots.length > 0) return Promise.resolve(shots);
+      return new Promise((resolve) => {
+        waiting.push(resolve);
+        setTimeout(() => resolve(shots), ms);
+      });
+    },
+  };
+
+  const isPatient = () => patient;
+
+  visit.done = (async () => {
+    await started;
+    add(await capturePage(startUrl, { width, isPatient, label: "accueil", onProgress }), startUrl, "accueil");
+
+    // Les autres pages sont photographiées ensemble. À la suite, chacune ajoutait
+    // son attente à celle des précédentes : une minute pour trois pages, là où les
+    // services travaillent très bien en parallèle.
+    const others = (await planned).map((page) => ({
+      ...page,
+      label: page.path.replace(/^\//, "").replace(/-/g, " ").slice(0, 28) || "page",
+    }));
+    const captured = await Promise.all(
+      others.map((page) => capturePage(page.url, { width, isPatient, label: page.label, onProgress })),
+    );
+    // Ajoutées dans l'ordre de la visite, pas dans celui des réponses.
+    others.forEach((page, index) => add(captured[index], page.url, page.label));
+    onProgress?.(`visite terminée : ${shots.length} page(s)`);
+    return shots;
+  })().catch(() => shots);
+
+  return visit;
+}
+
+/** Réservé aux vérifications : ces mesures n'ont de sens qu'avec de vraies images. */
+export const __test = { pageDetail, looksBlank, pagesToVisit };

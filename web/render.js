@@ -332,7 +332,8 @@ function drawSiteWindow(ctx, { screenshot, site, plan, progress, W, H, hero }) {
  * La page réelle, plein cadre, qui défile du haut vers le bas.
  * C'est ce plan qui fait qu'on voit le site, et pas seulement son nom.
  */
-function drawSitePage(ctx, screenshot, site, plan, progress, W, H) {
+function drawSitePage(ctx, shot, site, plan, progress, W, H) {
+  const screenshot = shot.bitmap;
   const scale = W / 1080;
   const zoom = 1 + 0.05 * progress;
   const drawW = W * zoom;
@@ -374,12 +375,16 @@ function drawSitePage(ctx, screenshot, site, plan, progress, W, H) {
   ctx.arc(barX + 34 * scale, barY + barH / 2, 9 * scale, 0, Math.PI * 2);
   ctx.fill();
 
+  // L'adresse exacte de la page visitée, chemin compris : on suit le parcours,
+  // au lieu de croire qu'on est resté sur l'accueil du début à la fin.
   ctx.font = `600 ${30 * scale}px ${FONT_STACK}`;
   ctx.fillStyle = "#e8ecf7";
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   ctx.lineWidth = 0;
-  ctx.fillText(site.domain, barX + 60 * scale, barY + barH / 2);
+  const full = `${site.domain}${shot.path ?? ""}`;
+  const address = full.length > 34 ? `${full.slice(0, 33)}…` : full;
+  ctx.fillText(address, barX + 60 * scale, barY + barH / 2);
 }
 
 function drawPhoto(ctx, bitmap, zoom, W, H) {
@@ -489,7 +494,7 @@ function drawProgress(ctx, elapsed, total, plan, W, H) {
 }
 
 export function drawFrame(ctx, context, elapsed) {
-  const { scenes, plan, site, screenshot, hero, totalDuration, position, total, W, H } = context;
+  const { scenes, plan, site, hero, totalDuration, position, total, W, H } = context;
   const scene = scenes.find((item) => elapsed < item.start + item.duration) ?? scenes[scenes.length - 1];
   const local = Math.max(0, Math.min(scene.duration, elapsed - scene.start));
   const progress = local / scene.duration;
@@ -500,13 +505,13 @@ export function drawFrame(ctx, context, elapsed) {
 
   // L'ouverture et la conclusion montrent le site lui-même ; entre les deux,
   // ses visuels occupent tout le cadre.
-  const asWindow = scene.role !== "body" || (!scene.bitmap && (screenshot || hero));
+  const asWindow = scene.role !== "body" || (!scene.bitmap && (scene.shot || hero));
   // Page réelle plein cadre : le titre passe sous la barre d'adresse.
-  const pageFull = asWindow && Boolean(screenshot);
-  const illustration = scene.bitmap ?? (asWindow ? null : (hero ?? screenshot));
+  const pageFull = asWindow && Boolean(scene.shot);
+  const illustration = scene.bitmap ?? (asWindow ? null : (hero ?? scene.shot?.bitmap));
 
-  if (asWindow && screenshot) {
-    drawSitePage(ctx, screenshot, site, plan, progress, W, H);
+  if (asWindow && scene.shot) {
+    drawSitePage(ctx, scene.shot, site, plan, progress, W, H);
   } else if (asWindow) {
     // Sans capture, la page est reconstituée avec le vrai visuel et les vrais textes.
     drawBrandBackdrop(ctx, plan, W, H);
@@ -622,7 +627,7 @@ export async function renderVideo({
   withVoice = true,
   mood = null,
   musicBuffer = null,
-  screenshot = null,
+  tour = [],
   onProgress,
   onStage,
 }) {
@@ -652,6 +657,17 @@ export async function renderVideo({
   }
 
   const hero = site.images.find((image) => image.bitmap)?.bitmap ?? null;
+
+  // La visite est figée ici pour toute la vidéo : elle continue de se remplir en
+  // arrière-plan, et une page qui arrive au milieu d'un plan le ferait sauter.
+  // Chaque plan « site » montre une page différente, pour qu'on avance vraiment
+  // dans le site au lieu de revoir l'accueil trois fois.
+  const pages = tour.filter((shot) => shot?.bitmap);
+  let cursor = position - 1;
+  for (const scene of scenes) {
+    const showsSite = scene.role !== "body" || !scene.bitmap;
+    scene.shot = showsSite && pages.length > 0 ? pages[cursor++ % pages.length] : null;
+  }
 
   // Avec `captureStream(0)`, aucune image n'est prélevée automatiquement : c'est nous
   // qui poussons chaque image dessinée. Le montage ne dépend donc plus de l'affichage
@@ -688,7 +704,7 @@ export async function renderVideo({
   recorder.start(250);
   const startedAt = performance.now() + lead * 1000;
 
-  const drawContext = { scenes, plan, site, screenshot, hero, totalDuration, position, total, W, H };
+  const drawContext = { scenes, plan, site, hero, totalDuration, position, total, W, H };
   let thumbnail = null;
   const ticker = createTicker(1000 / 30);
 

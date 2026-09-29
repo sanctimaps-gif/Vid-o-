@@ -4,7 +4,7 @@ import {
   loadImages,
   preferredSource,
   resetTransport,
-  siteScreenshot,
+  startVisit,
 } from "./scrape.js";
 import { writeCampaign, requestedCount, illustrateScenes } from "./writer.js";
 import { isSupported, renderVideo } from "./render.js";
@@ -295,13 +295,27 @@ form.addEventListener("submit", async (event) => {
     say("Lecture du site…");
     resetTransport();
 
-    // La capture part tout de suite et travaille pendant qu'on lit le site :
-    // l'attendre à la fin ajoutait son temps entier à celui de l'analyse.
-    const screenshotPromise = siteScreenshot(url, { width: canvas.width >= 1080 ? 900 : 720 }).catch(
-      () => null,
-    );
+    // La visite du site travaille pendant tout le reste : elle photographie la page
+    // d'accueil, puis deux autres pages. Ses messages ne s'affichent que lorsqu'on
+    // l'attend vraiment, pour ne pas écraser l'avancement du montage.
+    let visitNote = "";
+    let awaitingVisit = false;
+    const visit = startVisit(url, {
+      width: canvas.width >= 1080 ? 900 : 720,
+      onProgress: (message) => {
+        visitNote = message;
+        if (awaitingVisit) say(`Visite du site — ${message}`);
+      },
+    });
+
     const site = await crawlSite(url, { onProgress: (message) => say(`Lecture du site — ${message}`) });
-    stage("lecture du site", `via ${site.readVia ?? "?"}`);
+    // La lecture dit ce qu'est cette page : une carte interactive ne se photographie
+    // pas comme une page statique, et c'est elle aussi qui indique où aller ensuite.
+    visit.explore(site);
+    stage(
+      "lecture du site",
+      `via ${site.readVia ?? "?"}${site.interactive ? ` — ${site.interactive} détectée` : ""}`,
+    );
     const found =
       site.products.length > 0
         ? `${site.products.length} fiche(s) produit`
@@ -369,18 +383,34 @@ form.addEventListener("submit", async (event) => {
     const via = preferredSource();
     say(`${plan.videos.length} vidéo(s) à monter pour ${plan.brandName}${via ? ` (lu via ${via})` : ""}.`);
 
-    // Si la capture n'est pas encore prête, on ne la fait pas attendre : la première
-    // vidéo part sans elle, les suivantes en profiteront.
-    let screenshot = await Promise.race([
-      screenshotPromise,
-      new Promise((resolve) => setTimeout(() => resolve(undefined), 2500)),
-    ]);
-    if (screenshot === undefined) {
-      screenshot = null;
-      void screenshotPromise.then((late) => {
-        if (late) screenshot = late;
-      });
+    // Sur un site ordinaire, on ne fait pas attendre la première vidéo : elle part
+    // sans capture, les suivantes en profiteront. Sur un site qui se charge tout seul
+    // — une carte interactive, par exemple — l'attente est le but : photographier
+    // avant la fin du chargement ne montrerait qu'un cadre vide.
+    awaitingVisit = true;
+    if (site.interactive) {
+      say(
+        site.interactive === "carte"
+          ? "Le site contient une carte interactive : on attend qu'elle soit chargée avant de le filmer…"
+          : "Le site se construit tout seul : on attend qu'il soit affiché avant de le filmer…",
+      );
+      if (visitNote) say(`Visite du site — ${visitNote}`);
     }
+    // Site qui se charge tout seul : on attend la visite entière, pour que la
+    // première vidéo montre déjà le parcours et pas seulement l'accueil. Site
+    // ordinaire : on ne retarde rien, les pages rejoindront les vidéos suivantes.
+    if (site.interactive) {
+      await Promise.race([visit.done, new Promise((resolve) => setTimeout(resolve, 60000))]);
+    } else {
+      await visit.ready(2500);
+    }
+    awaitingVisit = false;
+    stage(
+      "visite du site",
+      visit.shots.length > 0
+        ? `${visit.shots.length} page(s) — ${visit.shots.map((shot) => shot.label).join(", ")}`
+        : "aucune capture pour l'instant",
+    );
 
     const audioContext = new (window.AudioContext ?? window.webkitAudioContext)();
     if (audioContext.state === "suspended") await audioContext.resume();
@@ -404,7 +434,9 @@ form.addEventListener("submit", async (event) => {
         withVoice,
         mood,
         musicBuffer: chosenMood === "file" ? musicBuffer : null,
-        screenshot,
+        // Les pages photographiées depuis le début de la visite : chaque vidéo montée
+        // profite de celles qui sont arrivées entre-temps.
+        tour: visit.shots,
         onStage: (step) => say(`Vidéo ${position}/${plan.videos.length} — ${step}`),
         onProgress: (ratio) => {
           const overall = (index + ratio) / plan.videos.length;
@@ -436,7 +468,14 @@ form.addEventListener("submit", async (event) => {
           `${ownImages.length > 0 ? `, ${ownImages.length} fournie(s) par vous` : ""}`,
         `scripts : ${writtenBy}`,
         `musique : ${chosenMood === "none" ? "aucune" : chosenMood === "file" ? "votre fichier" : `composée (${mood})`}`,
-        `capture de la page : ${screenshot ? "obtenue" : "indisponible"}`,
+        `visite : ${
+          visit.shots.length > 0
+            ? visit.shots
+                .map((shot) => `${shot.label} (${shot.via}, détail ${shot.detail.toFixed(2)})`)
+                .join(" · ")
+            : "aucune page photographiée"
+        }`,
+        site.interactive ? `chargement attendu : ${site.interactive}` : "page statique, capture immédiate",
       ].join("\n"),
     );
     stageArea.hidden = true;
