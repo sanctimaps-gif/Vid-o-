@@ -57,7 +57,68 @@ const SOURCES = [
 /** Lecteur de dernier recours : il exécute le JavaScript du site et renvoie du Markdown. */
 const READER = { id: "lecteur", url: (u) => `https://r.jina.ai/${u}` };
 
-const PRODUCT_PATH = /\/(products?|produits?|shop|boutique|item|articles?|collections?\/[^/]+\/products)\//i;
+/**
+ * Chemins qui annoncent une fiche. Le commerce d'abord, puis ce qu'on rencontre
+ * sur les sites de contenu : un saint, un lieu, un monument ont eux aussi leur
+ * page, et il n'y a aucune raison de ne savoir présenter qu'un article en vente.
+ */
+const PRODUCT_PATH =
+  /\/(products?|produits?|shop|boutique|item|articles?|collections?\/[^/]+\/products|saints?|saintes?|lieux?|sanctuaires?|chapelles?|[ée]glises?|basiliques?|abbayes?|monast[eè]res?|p[eè]lerinages?|monuments?|patrimoine|fiches?|notices?)\//i;
+
+/** Dossiers qui regroupent des pages sans en être : ils ne font pas un catalogue. */
+const NOT_A_FAMILY = /^(tag|tags|category|categorie|catégorie|categories|author|auteur|page|pages|feed|search|recherche|assets|static|media|wp-content|wp-json|cdn)$/i;
+
+/**
+ * Familles de pages. Les liens d'un même dossier qui ne diffèrent que par leur
+ * dernier segment forment un catalogue : /produits/x, /saints/y, /lieux/z. C'est
+ * ce qui permet de trouver les fiches d'un site sans rien savoir de son
+ * vocabulaire — et donc de présenter un saint comme on présente une veste.
+ */
+function pageFamilies(links, origin) {
+  const families = new Map();
+
+  for (const link of links) {
+    let parsed;
+    try {
+      parsed = new URL(link);
+    } catch {
+      continue;
+    }
+    if (parsed.origin !== origin) continue;
+
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    if (parts.length < 2 || parts.length > 3) continue;
+    if (parts.some((part) => NOT_A_FAMILY.test(part))) continue;
+
+    const prefix = parts.slice(0, -1).join("/");
+    if (!families.has(prefix)) families.set(prefix, new Set());
+    families.get(prefix).add(parsed.toString());
+  }
+
+  return [...families.entries()]
+    .map(([prefix, urls]) => ({ prefix, urls: [...urls] }))
+    // Trois pages sœurs, c'est un catalogue ; deux, c'est une coïncidence.
+    .filter((family) => family.urls.length >= 3)
+    .sort((a, b) => b.urls.length - a.urls.length);
+}
+
+/**
+ * Types de données structurées qui décrivent un sujet présentable. `Organization`
+ * en est exclu : c'est presque toujours l'éditeur du site, pas un sujet.
+ */
+const SUBJECT_TYPES = new Set(
+  ("Product Person Place Event Article NewsArticle BlogPosting CreativeWork Book " +
+    "TouristAttraction TouristDestination LandmarksOrHistoricalBuildings Church " +
+    "PlaceOfWorship Museum HistoricalPlace CivicStructure Painting VisualArtwork")
+    .split(" "),
+);
+
+function subjectNode(jsonLd) {
+  return flattenJsonLd(jsonLd).find((node) => {
+    const types = Array.isArray(node["@type"]) ? node["@type"] : [node["@type"]];
+    return types.some((type) => SUBJECT_TYPES.has(String(type)));
+  });
+}
 const SKIP_IMAGE = /(sprite|icon|favicon|placeholder|pixel|badge|payment|paypal|visa|mastercard|flag|\.svg|\.gif)/i;
 
 /**
@@ -598,31 +659,42 @@ export async function crawlSite(startUrl, { maxPages = 6, onProgress } = {}) {
   else if (looksLikeWooCommerce(rawHtml)) rawProducts = await tryWooCommerce(origin, onProgress);
 
   if (rawProducts.length < 4) {
-    const candidates = [...new Set(home.links)]
-      .filter((link) => {
-        try {
-          const url = new URL(link);
-          return url.origin === origin && PRODUCT_PATH.test(url.pathname);
-        } catch {
-          return false;
-        }
-      })
-      .slice(0, maxPages);
+    const links = [...new Set(home.links)];
+    const named = links.filter((link) => {
+      try {
+        const url = new URL(link);
+        return url.origin === origin && PRODUCT_PATH.test(url.pathname);
+      } catch {
+        return false;
+      }
+    });
+
+    // Aucun chemin reconnaissable : on cherche la plus grosse famille de pages
+    // sœurs. Un site de contenu range ses fiches comme une boutique range ses
+    // produits, il ne les appelle simplement pas pareil.
+    let candidates = named;
+    if (candidates.length < 3) {
+      const family = pageFamilies(links, origin)[0];
+      if (family) {
+        onProgress?.(`${family.urls.length} fiches trouvées dans /${family.prefix}`);
+        candidates = [...new Set([...named, ...family.urls])];
+      }
+    }
+    candidates = candidates.slice(0, maxPages);
 
     let done = 0;
     const fetched = await mapLimit(candidates, 4, async (link) => {
       try {
         const page = extractPage(await fetchRemote(link, { timeout: 12000 }), link);
-        const product = flattenJsonLd(page.jsonLd).find(
-          (node) =>
-            node["@type"] === "Product" ||
-            (Array.isArray(node["@type"]) && node["@type"].includes("Product")),
-        );
+        const subject = subjectNode(page.jsonLd);
+        const title = String(subject?.name ?? page.title).trim();
+        // Une page d'index ou d'erreur porte le titre du site : ce n'est pas un sujet.
+        if (!title || title === home.title) return null;
         return {
-          title: String(product?.name ?? page.title).trim(),
+          title,
           url: link,
-          price: priceFromOffers(product?.offers),
-          description: String(product?.description ?? page.description ?? page.text.slice(0, 300))
+          price: priceFromOffers(subject?.offers),
+          description: String(subject?.description ?? page.description ?? page.text.slice(0, 300))
             .replace(/\s+/g, " ")
             .trim()
             .slice(0, 600),
@@ -978,13 +1050,19 @@ const VISIT_SKIP =
 const VISIT_PREFER =
   /(carte|map|galerie|gallery|boutique|shop|produits?|products?|collections?|decouvrir|découvrir|explorer|visite|lieux|sanctuaire|about|propos|services?)/i;
 
-/** Les pages qui valent la visite : celles qui montrent quelque chose. */
-function pagesToVisit(site, limit) {
+/**
+ * Les pages qui valent la visite : d'abord celles dont les vidéos vont parler —
+ * la fiche d'un saint, d'un lieu, d'un produit — puis celles qui montrent
+ * quelque chose. Une vidéo qui présente un sujet doit ouvrir sur sa page à lui.
+ */
+function pagesToVisit(site, limit, prefer = []) {
   const home = pathLabel(site.url);
   const seen = new Set([home]);
   const candidates = [];
 
-  for (const link of site.links ?? []) {
+  const wanted = new Set(prefer);
+
+  for (const link of [...prefer, ...(site.links ?? [])]) {
     let parsed;
     try {
       parsed = new URL(link);
@@ -997,12 +1075,13 @@ function pagesToVisit(site, limit) {
     // Une page enterrée à quatre niveaux est rarement celle qu'on montrerait.
     if (path.split("/").length > 4) continue;
     seen.add(path);
-    candidates.push({ url: link, path });
+    candidates.push({ url: link, path, asked: wanted.has(link) });
   }
 
-  return candidates
-    .sort((a, b) => Number(VISIT_PREFER.test(b.path)) - Number(VISIT_PREFER.test(a.path)))
-    .slice(0, limit);
+  // Une page demandée passe avant toute autre : c'est celle dont la vidéo parle.
+  // Sans cette priorité, un « à propos » bien nommé doublait la fiche du sujet.
+  const rank = (page) => (page.asked ? 2 : VISIT_PREFER.test(page.path) ? 1 : 0);
+  return candidates.sort((a, b) => rank(b) - rank(a)).slice(0, limit);
 }
 
 /**
@@ -1014,7 +1093,7 @@ function pagesToVisit(site, limit) {
  * carte n'est pas photographié comme une page statique — et au plus tard au bout
  * de quatre secondes, pour ne pas retarder les sites ordinaires.
  */
-export function startVisit(startUrl, { width = 720, pages = 2, onProgress } = {}) {
+export function startVisit(startUrl, { width = 720, pages = 3, onProgress } = {}) {
   const shots = [];
   const waiting = [];
   let patient = false;
@@ -1047,14 +1126,17 @@ export function startVisit(startUrl, { width = 720, pages = 2, onProgress } = {}
       return kind;
     },
 
-    /** La lecture du site a abouti : elle dit ce qu'est la page, et où aller ensuite. */
-    explore(site) {
+    /**
+     * La lecture du site a abouti : elle dit ce qu'est la page, et où aller
+     * ensuite. `prefer` porte les pages des sujets que les vidéos vont présenter.
+     */
+    explore(site, prefer = []) {
       kind = site.interactive ?? null;
       patient = Boolean(site.interactive);
       clearTimeout(beginTimer);
       clearTimeout(pagesTimer);
       begin();
-      announcePages(pagesToVisit(site, pages));
+      announcePages(pagesToVisit(site, pages, prefer));
     },
 
     /** Attend qu'au moins une page soit photographiée, sans dépasser `ms`. */

@@ -31,8 +31,12 @@ out/ma-boutique-fr-2026-09-091132/
 ## Comment ça marche
 
 1. **Lecture du site.** Vid-O explore votre site : catalogue Shopify ou WooCommerce quand il y en a
-   un, sinon les fiches produit trouvées depuis la page d'accueil. Il en tire les noms, les prix,
-   les descriptions et les photos, et respecte votre `robots.txt`.
+   un, sinon les fiches atteintes depuis la page d'accueil. Il ne cherche pas que des produits :
+   les pages d'un même dossier qui ne diffèrent que par leur nom — `/saints/…`, `/lieux/…`,
+   `/f/…` — forment un catalogue, et chacune devient un sujet présentable. Il en tire les noms,
+   les descriptions, les prix s'il y en a et les photos, et respecte votre `robots.txt`.
+   Une fiche sans prix est présentée, pas vendue : le vocabulaire de boutique est réservé aux
+   pages qui affichent un prix, et chaque vidéo ouvre sur la page de son propre sujet.
 2. **Visite du site** (page navigateur). Vid-O photographie la page d'accueil, puis deux autres
    pages du site : la vidéo suit ce parcours, adresse affichée à l'écran. Quand la page se
    construit toute seule après son affichage — **carte interactive**, application JavaScript —

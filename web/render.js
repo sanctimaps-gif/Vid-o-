@@ -670,12 +670,22 @@ export async function renderVideo({
   // Chaque plan « site » montre une page différente, pour qu'on avance vraiment
   // dans le site au lieu de revoir l'accueil trois fois.
   const pages = tour.filter((shot) => shot?.bitmap);
+
+  // La page du sujet présenté passe en premier : une vidéo sur saint Michel doit
+  // ouvrir sur la page de saint Michel, son adresse affichée, et non sur l'accueil.
+  // Une vidéo qui présente un sujet reste sur la page de ce sujet du début à la
+  // fin : passer à la page d'un autre saint au milieu contredirait ce qui est dit.
+  // Seules les vidéos sur le site entier parcourent les pages l'une après l'autre.
+  const own = video.pageUrl ? pages.find((shot) => shot.url === video.pageUrl) : null;
+
   let shown = 0;
   for (const scene of scenes) {
     const showsSite = scene.role !== "body" || !scene.bitmap;
     scene.shot =
       scene.pageShot ??
-      (showsSite && pages.length > 0 ? pages[(position - 1 + shown) % pages.length] : null);
+      (showsSite && pages.length > 0
+        ? (own ?? pages[(position - 1 + shown) % pages.length])
+        : null);
 
     if (scene.shot) {
       // Chaque plan parcourt une autre portion de la page. Sur un site qui n'a que

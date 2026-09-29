@@ -42,6 +42,30 @@ const PHRASES = {
       "Une carte, et tout ce qu'il y a autour de vous.",
     ],
     mapHookTexts: ["OUVREZ LA CARTE", "A EXPLORER", "TOUT EST SUR LA CARTE", "ZOOMEZ", "REPEREZ-VOUS"],
+    // Un saint, un lieu, un monument : une fiche sans prix. Les accroches de
+    // boutique — « cette piece change une tenue » — n'ont aucun sens dessus.
+    subjectHooks: [
+      "Prenez trente secondes, celui-la vaut le detour.",
+      "Vous passez peut-etre a cote sans le savoir.",
+      "Voila ce qu'il faut retenir a son sujet.",
+      "Celui-la merite qu'on s'arrete un instant.",
+      "On vous le presente en trente secondes.",
+      "Arretez de faire defiler, ca vaut le coup d'oeil.",
+    ],
+    subjectHookTexts: [
+      "A DECOUVRIR",
+      "CA VAUT LE DETOUR",
+      "A CONNAITRE",
+      "ARRETEZ-VOUS ICI",
+      "TRENTE SECONDES",
+      "REGARDEZ CA",
+    ],
+    subjectListHook: (count, what) => `${count} ${what} a decouvrir, restez jusqu'a la fin.`,
+    subjectTitle: (name, brand) => `${name} | ${brand} #Shorts`,
+    subjectSeriesTitle: (position, total, name) => `${position} sur ${total} : ${name} #Shorts`,
+    subjectDescription: (name, brand, url) =>
+      `${name}, a decouvrir sur ${brand}.\n\nTout est sur ${url}`,
+    subjectTags: ["decouverte", "patrimoine", "a voir"],
     siteTitle: (brand) => `${brand}, en trente secondes #Shorts`,
     siteSeriesTitle: (position, total, topic, brand) => `${position}/${total} — ${topic} | ${brand} #Shorts`,
     priceLine: (price) => `Elle est affichee a ${price} sur le site.`,
@@ -93,6 +117,27 @@ const PHRASES = {
       "One map, and everything around you.",
     ],
     mapHookTexts: ["OPEN THE MAP", "GO EXPLORE", "IT IS ALL ON THE MAP", "ZOOM IN", "FIND YOUR WAY"],
+    subjectHooks: [
+      "Give it thirty seconds, this one is worth it.",
+      "You may be walking straight past it.",
+      "Here is what to remember about this one.",
+      "This one deserves a moment of your time.",
+      "Thirty seconds, and you will know it.",
+      "Stop scrolling, this one is worth a look.",
+    ],
+    subjectHookTexts: [
+      "WORTH DISCOVERING",
+      "WORTH THE DETOUR",
+      "WORTH KNOWING",
+      "STOP HERE",
+      "THIRTY SECONDS",
+      "LOOK AT THIS",
+    ],
+    subjectListHook: (count, what) => `${count} ${what} worth knowing, stay to the end.`,
+    subjectTitle: (name, brand) => `${name} | ${brand} #Shorts`,
+    subjectSeriesTitle: (position, total, name) => `${position} of ${total}: ${name} #Shorts`,
+    subjectDescription: (name, brand, url) => `${name}, discover it on ${brand}.\n\nEverything is on ${url}`,
+    subjectTags: ["discover", "heritage", "must see"],
     siteTitle: (brand) => `${brand}, in thirty seconds #Shorts`,
     siteSeriesTitle: (position, total, topic, brand) => `${position}/${total} — ${topic} | ${brand} #Shorts`,
     priceLine: (price) => `It is listed at ${price} on the site.`,
@@ -166,7 +211,9 @@ function sentences(text, limit) {
 }
 
 function shortLabel(title) {
-  const clean = normalize(title).replace(/\s*[|–-]\s*.*$/, "");
+  // Le séparateur doit être entouré d'espaces : « Chapelle Sainte-Anne » n'est pas
+  // un titre suivi d'une accroche, et se faisait couper en « Chapelle Sainte ».
+  const clean = normalize(title).replace(/\s+[|–—-]\s+.*$/, "");
   return clean.split(/\s+/).slice(0, 5).join(" ").slice(0, 34).toUpperCase();
 }
 
@@ -263,13 +310,21 @@ function relevance(product, keywords) {
   return score;
 }
 
-function subjectFromBrief(brief, fallback) {
-  const match =
-    /\b(?:sur|about|des|les|of the|the)\s+(?:\d+\s+)?(?:meilleur(?:e|s|es)?\s+|best\s+|top\s+)?([\p{L}\s]{3,28})/iu.exec(
-      brief,
-    );
-  const captured = match?.[1]?.trim().split(/\s+/).slice(0, 3).join(" ");
-  return captured && captured.length > 2 ? captured.toLowerCase() : fallback;
+/**
+ * Le mot par lequel la consigne désigne ce qu'on présente — « robes », « tenues »,
+ * « saints ». Il ne sert qu'à l'accroche de série, « 5 robes à découvrir », donc
+ * on ne le retient qu'au pluriel : « 2 saint » ne veut rien dire. Sans mot au
+ * pluriel dans la consigne, on renonce à cette accroche plutôt que d'inventer une
+ * catégorie — c'est ainsi qu'une série sur des saints s'annonçait « 2 pièces ».
+ */
+function subjectFromBrief(brief) {
+  for (const word of normalize(brief)
+    .toLowerCase()
+    .replace(/[^\p{L}\s]/gu, " ")
+    .split(/\s+/)) {
+    if (word.length > 3 && /[sx]$/.test(word) && !STOPWORDS.has(word)) return word;
+  }
+  return null;
 }
 
 /** Couleur d'accent : la teinte la plus franche d'un visuel du site. */
@@ -363,7 +418,7 @@ export function illustrateScenes(plan, site) {
   // Ordre de préférence : vos images, puis les photos du site, puis les vues des
   // pages. Ces dernières illustrent toujours quelque chose de vrai, mais une photo
   // de produit reste plus parlante qu'une page entière.
-  const pool = [
+  const base = [
     ...available.filter((image) => image.fromUser),
     ...available.filter((image) => !image.fromUser && !image.fromVisit),
     ...available.filter((image) => image.fromVisit),
@@ -371,6 +426,17 @@ export function illustrateScenes(plan, site) {
   let cursor = 0;
 
   for (const video of plan.videos) {
+    // La vue de la page du sujet passe devant, pour cette vidéo-là. Sans cela, sur
+    // un site sans photos, la répartition tournante donnait à la vidéo sur saint
+    // Michel la page d'un autre sujet.
+    const own = video.pageUrl
+      ? available.filter((image) => image.fromVisit && image.url === video.pageUrl)
+      : [];
+    // Quand la page du sujet est connue, elle illustre toute la vidéo : montrer la
+    // page d'un autre sujet au milieu d'une présentation la rendrait fausse.
+    const pool = own.length > 0 ? own : base;
+    if (own.length > 0) cursor = 0;
+
     for (const scene of video.scenes) {
       if (scene.role !== "body" || scene.imageIndex >= 0) continue;
       scene.imageIndex = pool[cursor % pool.length].index;
@@ -380,15 +446,17 @@ export function illustrateScenes(plan, site) {
   return plan;
 }
 
-export function writeCampaign(site, brief, count) {
-  const lang = detectLang(site, brief);
-  const book = PHRASES[lang];
-  const total = count ?? requestedCount(brief);
-
-  // La consigne décide d'abord : un produit qu'elle nomme passe devant un produit
-  // simplement bien illustré. À égalité seulement, la richesse de la fiche tranche.
+/**
+ * Les sujets du site, du plus demandé au moins demandé.
+ *
+ * La consigne décide d'abord : un sujet qu'elle nomme — « saint Michel » — passe
+ * devant un sujet simplement bien illustré. À égalité seulement, la richesse de
+ * la fiche tranche. La visite du site s'appuie sur ce même classement, pour aller
+ * photographier les pages dont les vidéos vont parler.
+ */
+export function rankSubjects(site, brief) {
   const keywords = briefKeywords(brief);
-  const ranked = [...site.products].sort((a, b) => {
+  return [...site.products].sort((a, b) => {
     const wanted = relevance(b, keywords) - relevance(a, keywords);
     if (wanted !== 0) return wanted;
     const richness = (product) =>
@@ -397,7 +465,42 @@ export function writeCampaign(site, brief, count) {
       (product.description && product.description.length > 60 ? 1 : 0);
     return richness(b) - richness(a);
   });
+}
 
+/**
+ * Rattache chaque vidéo à la page du sujet qu'elle présente, en retrouvant la
+ * fiche par son titre. Le montage ouvre alors sur cette page-là, adresse comprise,
+ * au lieu de la page d'accueil — y compris quand c'est un modèle qui a écrit.
+ */
+export function attachSubjectPages(plan, site) {
+  for (const video of plan.videos) {
+    if (video.pageUrl) continue;
+    const wanted = new Set(wordsOf(video.concept ?? video.youtubeTitle ?? ""));
+    if (wanted.size === 0) continue;
+
+    let best = null;
+    let bestScore = 0;
+    for (const product of site.products) {
+      if (!product.url) continue;
+      const words = wordsOf(product.title);
+      const score = words.filter((word) => wanted.has(word)).length / Math.max(1, words.length);
+      if (score > bestScore) {
+        bestScore = score;
+        best = product;
+      }
+    }
+    // Moitié des mots du titre en commun : en dessous, ce n'est plus le même sujet.
+    if (best && bestScore >= 0.5) video.pageUrl = best.url;
+  }
+  return plan;
+}
+
+export function writeCampaign(site, brief, count) {
+  const lang = detectLang(site, brief);
+  const book = PHRASES[lang];
+  const total = count ?? requestedCount(brief);
+
+  const ranked = rankSubjects(site, brief);
   let selected = ranked.slice(0, total);
   let kind = "product";
 
@@ -414,21 +517,34 @@ export function writeCampaign(site, brief, count) {
     );
   }
 
-  const subject = subjectFromBrief(brief, lang === "fr" ? "pièces" : "pieces");
+  const subject = subjectFromBrief(brief);
   const usable = new Set(site.images.filter((image) => image.bitmap).map((image) => image.index));
   const firstBitmap = site.images.find((image) => image.bitmap)?.bitmap;
+
+  // Une fiche sans prix n'est pas un article en vente. Un saint, un lieu, un
+  // monument se présentent — le vocabulaire de boutique n'a rien à y faire.
+  const priced = selected.some((item) => item.price);
 
   const videos = selected.map((product, index) => {
     const available = (product.imageIndexes ?? []).filter((i) => usable.has(i));
     const image = (position) => (available.length > 0 ? pick(available, position) : -1);
 
-    // Accroches : celles de la carte quand le site en est une, sinon celles du
-    // site ou celles du produit.
+    // Accroches : celles de la carte quand c'est le site entier qu'on présente et
+    // qu'il en est une, celles de la boutique quand la fiche a un prix, et sinon
+    // celles d'un sujet qu'on fait découvrir.
     const hooks =
-      kind !== "site" ? book.hooks : site.interactive === "carte" ? book.mapHooks : book.siteHooks;
+      kind !== "site"
+        ? priced
+          ? book.hooks
+          : book.subjectHooks
+        : site.interactive === "carte"
+          ? book.mapHooks
+          : book.siteHooks;
     const hookTexts =
       kind !== "site"
-        ? book.hookTexts
+        ? priced
+          ? book.hookTexts
+          : book.subjectHookTexts
         : site.interactive === "carte"
           ? book.mapHookTexts
           : book.siteHookTexts;
@@ -483,9 +599,11 @@ export function writeCampaign(site, brief, count) {
       role: "cta",
     });
 
-    if (selected.length > 1 && index === 0 && kind === "product") {
+    if (selected.length > 1 && index === 0 && kind === "product" && subject) {
       scenes[0] = {
-        narration: book.listHook(selected.length, subject),
+        narration: priced
+          ? book.listHook(selected.length, subject)
+          : book.subjectListHook(selected.length, subject),
         onScreenText: trimWords(`${selected.length} ${subject.toUpperCase()}`, 30),
         imageIndex: scenes[0].imageIndex,
         role: "hook",
@@ -493,21 +611,36 @@ export function writeCampaign(site, brief, count) {
     }
 
     const label = normalize(product.title);
+    const tags = priced ? book.defaultTags : book.subjectTags;
+
+    const title = () => {
+      if (kind === "site") {
+        return selected.length > 1
+          ? book.siteSeriesTitle(index + 1, selected.length, label, site.siteName)
+          : book.siteTitle(site.siteName);
+      }
+      if (priced) {
+        return selected.length > 1
+          ? book.seriesTitle(index + 1, selected.length, label)
+          : book.title(label, site.siteName);
+      }
+      return selected.length > 1
+        ? book.subjectSeriesTitle(index + 1, selected.length, label)
+        : book.subjectTitle(label, site.siteName);
+    };
+
     return {
       slug: slugify(product.title, `video-${index + 1}`),
       concept: label,
+      // La page d'où vient ce sujet : le montage ouvrira dessus.
+      pageUrl: kind === "product" ? (product.url ?? null) : null,
       scenes,
-      youtubeTitle: (kind === "site"
-        ? selected.length > 1
-          ? book.siteSeriesTitle(index + 1, selected.length, label, site.siteName)
-          : book.siteTitle(site.siteName)
-        : selected.length > 1
-          ? book.seriesTitle(index + 1, selected.length, label)
-          : book.title(label, site.siteName)
-      ).slice(0, 98),
-      youtubeDescription: book.description(label, site.siteName, site.url),
-      hashtags: [slugify(site.siteName, "boutique").replace(/-/g, ""), ...book.defaultTags.slice(0, 2)],
-      tags: [label, site.siteName, ...book.defaultTags],
+      youtubeTitle: title().slice(0, 98),
+      youtubeDescription: priced
+        ? book.description(label, site.siteName, site.url)
+        : book.subjectDescription(label, site.siteName, site.url),
+      hashtags: [slugify(site.siteName, "site").replace(/-/g, ""), ...tags.slice(0, 2)],
+      tags: [label, site.siteName, ...tags],
     };
   });
 

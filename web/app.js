@@ -6,7 +6,13 @@ import {
   resetTransport,
   startVisit,
 } from "./scrape.js";
-import { writeCampaign, requestedCount, illustrateScenes } from "./writer.js";
+import {
+  writeCampaign,
+  requestedCount,
+  illustrateScenes,
+  rankSubjects,
+  attachSubjectPages,
+} from "./writer.js";
 import { isSupported, renderVideo } from "./render.js";
 import { MOOD_NAMES } from "./audio.js";
 import { providerForKey, writeWithModel } from "./llm.js";
@@ -310,15 +316,23 @@ form.addEventListener("submit", async (event) => {
 
     const site = await crawlSite(url, { onProgress: (message) => say(`Lecture du site — ${message}`) });
     // La lecture dit ce qu'est cette page : une carte interactive ne se photographie
-    // pas comme une page statique, et c'est elle aussi qui indique où aller ensuite.
-    visit.explore(site);
+    // pas comme une page statique. Elle dit aussi où aller ensuite — et en premier
+    // lieu les pages des sujets que la consigne met en avant, pour que la vidéo qui
+    // présente un sujet ouvre sur la page de ce sujet.
+    visit.explore(
+      site,
+      rankSubjects(site, brief)
+        .slice(0, 3)
+        .map((subject) => subject.url)
+        .filter(Boolean),
+    );
     stage(
       "lecture du site",
       `via ${site.readVia ?? "?"}${site.interactive ? ` — ${site.interactive} détectée` : ""}`,
     );
     const found =
       site.products.length > 0
-        ? `${site.products.length} fiche(s) produit`
+        ? `${site.products.length} fiche(s)`
         : `${site.sections?.length ?? 0} section(s) de page`;
     say(`${found} — téléchargement des visuels…`);
 
@@ -429,6 +443,9 @@ form.addEventListener("submit", async (event) => {
       }
     }
     if (!plan) plan = writeCampaign(site, brief, wanted);
+    // Le rattachement vient d'abord : le rédacteur intégré sait de quelle page
+    // vient son sujet, un modèle non — et c'est cette page qui illustre la vidéo.
+    attachSubjectPages(plan, site);
     illustrateScenes(plan, site);
     stage("écriture des scripts", `${plan.videos.length} vidéo(s), par ${writtenBy}`);
     const via = preferredSource();

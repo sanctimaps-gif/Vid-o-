@@ -88,10 +88,17 @@ function describeSite(site) {
   lines.push("");
 
   if (site.products.length > 0) {
-    lines.push(`PRODUITS / PAGES (${site.products.length}) :`);
+    // « Fiches » et non « produits » : sur un site de contenu ce sont des sujets —
+    // un saint, un lieu, un monument — et les présenter comme des articles en
+    // vente donnerait un texte faux.
+    const priced = site.products.some((product) => product.price);
+    lines.push(
+      `FICHES DU SITE (${site.products.length})${priced ? "" : " — ce sont des sujets à présenter, pas des articles en vente"} :`,
+    );
     for (const product of site.products.slice(0, 25)) {
       const parts = [`- ${product.title}`];
       if (product.price) parts.push(`prix : ${product.price}`);
+      if (product.url) parts.push(`page : ${product.url}`);
       if (product.imageIndexes?.length) parts.push(`images : ${product.imageIndexes.join(", ")}`);
       lines.push(parts.join(" | "));
       if (product.description) lines.push(`  ${product.description.slice(0, 260)}`);
