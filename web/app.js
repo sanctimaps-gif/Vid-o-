@@ -338,18 +338,69 @@ form.addEventListener("submit", async (event) => {
       });
     }
 
-    const total = loaded + ownImages.length;
+    const photos = loaded + ownImages.length;
     stage(
       "téléchargement des visuels",
       `${loaded} du site${ownImages.length > 0 ? ` + ${ownImages.length} fournie(s)` : ""}`,
     );
+
+    // La visite est attendue ici, avant l'écriture : ses pages comptent parmi les
+    // visuels, et un site qui n'expose aucune photo — une carte, une application —
+    // n'a qu'elles à montrer. Site ordinaire : on ne retarde rien, 2,5 s au plus.
+    awaitingVisit = true;
+    if (site.interactive) {
+      say(
+        site.interactive === "carte"
+          ? "Le site contient une carte interactive : on attend qu'elle soit chargée avant de le filmer…"
+          : "Le site se construit tout seul : on attend qu'il soit affiché avant de le filmer…",
+      );
+      if (visitNote) say(`Visite du site — ${visitNote}`);
+      await Promise.race([visit.done, new Promise((resolve) => setTimeout(resolve, 60000))]);
+    } else {
+      await visit.ready(2500);
+    }
+    awaitingVisit = false;
+    stage(
+      "visite du site",
+      visit.shots.length > 0
+        ? `${visit.shots.length} page(s) — ${visit.shots.map((shot) => shot.label).join(", ")}`
+        : "aucune capture",
+    );
+
+    // Un site sans photos n'est pas un site sans images : ses propres pages en sont.
+    // Elles rejoignent la banque de visuels, en dernier, pour que les sites qui ont
+    // de vraies photos gardent les leurs.
+    let fromVisit = 0;
+    if (photos < 3) {
+      for (const shot of visit.shots) {
+        site.images.push({
+          index: site.images.length,
+          url: shot.url,
+          alt: `${site.domain}${shot.path}`,
+          source: "page du site",
+          bitmap: shot.bitmap,
+          fromVisit: true,
+          shot,
+        });
+        fromVisit += 1;
+      }
+    }
+
+    const total = photos + fromVisit;
     say(`${total} visuel(s) exploitable(s). Écriture des scripts…`);
 
     if (total === 0) {
       warn(
-        "Aucun visuel n'a pu être récupéré sur ce site : les vidéos seront illustrées par la page " +
-          "elle-même et par vos couleurs. Ajoutez vos propres images dans le formulaire pour un " +
-          "rendu nettement plus riche.",
+        "Aucun visuel n'a pu être récupéré sur ce site, et aucune capture de vos pages n'a abouti : " +
+          "les vidéos seront illustrées par vos couleurs seules. Ajoutez vos propres images dans le " +
+          "formulaire pour un rendu nettement plus riche.",
+      );
+    } else if (photos === 0) {
+      warn(
+        `Ce site n'expose aucune photo réutilisable — c'est courant quand la page se construit ` +
+          `toute seule. Les vidéos sont donc illustrées par ${fromVisit} vue(s) réelle(s) de votre ` +
+          "site, prises une fois la page chargée. Ajoutez vos propres images dans le formulaire " +
+          "pour les compléter.",
       );
     }
 
@@ -382,35 +433,6 @@ form.addEventListener("submit", async (event) => {
     stage("écriture des scripts", `${plan.videos.length} vidéo(s), par ${writtenBy}`);
     const via = preferredSource();
     say(`${plan.videos.length} vidéo(s) à monter pour ${plan.brandName}${via ? ` (lu via ${via})` : ""}.`);
-
-    // Sur un site ordinaire, on ne fait pas attendre la première vidéo : elle part
-    // sans capture, les suivantes en profiteront. Sur un site qui se charge tout seul
-    // — une carte interactive, par exemple — l'attente est le but : photographier
-    // avant la fin du chargement ne montrerait qu'un cadre vide.
-    awaitingVisit = true;
-    if (site.interactive) {
-      say(
-        site.interactive === "carte"
-          ? "Le site contient une carte interactive : on attend qu'elle soit chargée avant de le filmer…"
-          : "Le site se construit tout seul : on attend qu'il soit affiché avant de le filmer…",
-      );
-      if (visitNote) say(`Visite du site — ${visitNote}`);
-    }
-    // Site qui se charge tout seul : on attend la visite entière, pour que la
-    // première vidéo montre déjà le parcours et pas seulement l'accueil. Site
-    // ordinaire : on ne retarde rien, les pages rejoindront les vidéos suivantes.
-    if (site.interactive) {
-      await Promise.race([visit.done, new Promise((resolve) => setTimeout(resolve, 60000))]);
-    } else {
-      await visit.ready(2500);
-    }
-    awaitingVisit = false;
-    stage(
-      "visite du site",
-      visit.shots.length > 0
-        ? `${visit.shots.length} page(s) — ${visit.shots.map((shot) => shot.label).join(", ")}`
-        : "aucune capture pour l'instant",
-    );
 
     const audioContext = new (window.AudioContext ?? window.webkitAudioContext)();
     if (audioContext.state === "suspended") await audioContext.resume();
@@ -464,8 +486,9 @@ form.addEventListener("submit", async (event) => {
     showReport(
       site,
       [
-        `visuels : ${site.images.filter((image) => image.bitmap && !image.fromUser).length} du site` +
-          `${ownImages.length > 0 ? `, ${ownImages.length} fournie(s) par vous` : ""}`,
+        `visuels : ${loaded} photo(s) du site` +
+          `${ownImages.length > 0 ? `, ${ownImages.length} fournie(s) par vous` : ""}` +
+          `${fromVisit > 0 ? `, ${fromVisit} vue(s) de vos pages` : ""}`,
         `scripts : ${writtenBy}`,
         `musique : ${chosenMood === "none" ? "aucune" : chosenMood === "file" ? "votre fichier" : `composée (${mood})`}`,
         `visite : ${

@@ -360,6 +360,20 @@ function extractPage(html, pageUrl) {
     if (resolved) links.push(resolved);
   }
 
+  // Le texte des balises techniques fait partie du `textContent` de la page. Sans
+  // ce nettoyage, le code JavaScript du site finissait dans la narration et dans
+  // les sous-titres — d'autant plus qu'un site construit en JavaScript en contient
+  // beaucoup plus que de phrases. Le retrait vient ici, après la lecture des
+  // données structurées et des fonds d'image, qui logent justement dans ces balises.
+  // Les menus et les pieds de page partent aussi : ce sont des listes de liens, pas
+  // des phrases, et lus à voix haute ils donnent « À propos Mentions légales
+  // Contact ». Les liens, eux, ont déjà été relevés juste au-dessus.
+  for (const junk of doc.querySelectorAll(
+    "script, style, noscript, template, svg, iframe, nav, footer",
+  )) {
+    junk.remove();
+  }
+
   const body = (doc.querySelector("main") ?? doc.body)?.textContent ?? "";
 
   return {
@@ -381,7 +395,10 @@ function extractPage(html, pageUrl) {
 
 function extractMarkdown(markdown, pageUrl) {
   const title = /^Title:\s*(.+)$/m.exec(markdown)?.[1]?.trim() ?? "";
-  const body = markdown.replace(/^[\s\S]*?Markdown Content:\s*/m, "");
+  const body = markdown
+    .replace(/^[\s\S]*?Markdown Content:\s*/m, "")
+    // Les blocs de code du lecteur ne sont pas du texte à lire à voix haute.
+    .replace(/```[\s\S]*?```/g, " ");
 
   const images = [];
   for (const match of body.matchAll(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)/g)) {
@@ -647,6 +664,23 @@ export async function crawlSite(startUrl, { maxPages = 6, onProgress } = {}) {
         /* page inaccessible : on continue */
       }
       if (harvested.length >= 12) break;
+    }
+  }
+
+  // Pas une seule image dans tout le site : la page ne les montre probablement
+  // qu'une fois exécutée. Le lecteur, lui, l'exécute avant de répondre — c'est la
+  // dernière source avant de renoncer.
+  if (harvested.length === 0 && readVia !== READER.id) {
+    onProgress?.("aucune image dans la page, relecture par le lecteur");
+    try {
+      const markdown = await withTimeout(
+        fetch(READER.url(startUrl)).then((response) => response.text()),
+        20000,
+        "lecteur",
+      );
+      harvested.push(...extractMarkdown(markdown, startUrl).images);
+    } catch {
+      /* le lecteur n'a rien donné non plus */
     }
   }
 

@@ -143,12 +143,25 @@ function formatPrice(raw) {
   return price.replace(/(\d)[.,]00\b/g, "$1").replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Ce fragment est-il du code plutôt qu'une phrase ?
+ *
+ * Le texte d'un site peut contenir du code resté dans la page. Lu à voix haute, ça
+ * donne « accolade window point carte égale » : inutilisable. On l'écarte à ses
+ * marques — accolades, flèches, appels de fonction, ponctuation de programmeur.
+ */
+function looksLikeCode(text) {
+  if (/[{}]|=>|;\s*\)|\)\s*;|\bfunction\s*\(|\b(var|const|let)\s+\w+\s*=|<\/?\w+>/.test(text)) return true;
+  const symbols = (text.match(/[<>{}[\]()=_|\\/$#@]/g) ?? []).length;
+  return symbols / Math.max(1, text.length) > 0.06;
+}
+
 function sentences(text, limit) {
   if (!text) return [];
   return normalize(text)
     .split(/(?<=[.!?])\s+/)
     .map((sentence) => sentence.trim())
-    .filter((sentence) => sentence.length > 12 && sentence.length < 190)
+    .filter((sentence) => sentence.length > 12 && sentence.length < 190 && !looksLikeCode(sentence))
     .slice(0, limit);
 }
 
@@ -347,9 +360,13 @@ export function illustrateScenes(plan, site) {
   const available = site.images.filter((image) => image.bitmap);
   if (available.length === 0) return plan;
 
+  // Ordre de préférence : vos images, puis les photos du site, puis les vues des
+  // pages. Ces dernières illustrent toujours quelque chose de vrai, mais une photo
+  // de produit reste plus parlante qu'une page entière.
   const pool = [
     ...available.filter((image) => image.fromUser),
-    ...available.filter((image) => !image.fromUser),
+    ...available.filter((image) => !image.fromUser && !image.fromVisit),
+    ...available.filter((image) => image.fromVisit),
   ];
   let cursor = 0;
 

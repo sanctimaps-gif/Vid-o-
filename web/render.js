@@ -174,13 +174,18 @@ export async function prepareScenes(video, site, options) {
     const duration = Math.min(MAX_SCENE, Math.max(MIN_SCENE, spoken + PAD_START + PAD_END));
     const image = site.images.find((candidate) => candidate.index === scene.imageIndex && candidate.bitmap);
 
+    // Une vue du site n'est pas une photo : la cadrer au centre d'un fond flou
+    // donnerait une vignette illisible. Elle se montre comme une page qui défile.
+    const isPage = Boolean(image?.fromVisit);
+
     const chunks = chunkForCaptions(narration);
     prepared.push({
       index,
       narration,
       onScreenText: normalize(scene.onScreenText),
       role: scene.role,
-      bitmap: image?.bitmap ?? null,
+      bitmap: isPage ? null : (image?.bitmap ?? null),
+      pageShot: isPage ? (image.shot ?? { bitmap: image.bitmap, path: "" }) : null,
       voice,
       duration,
       spoken,
@@ -332,16 +337,18 @@ function drawSiteWindow(ctx, { screenshot, site, plan, progress, W, H, hero }) {
  * La page réelle, plein cadre, qui défile du haut vers le bas.
  * C'est ce plan qui fait qu'on voit le site, et pas seulement son nom.
  */
-function drawSitePage(ctx, shot, site, plan, progress, W, H) {
+function drawSitePage(ctx, shot, site, plan, progress, W, H, range = [0, 1]) {
   const screenshot = shot.bitmap;
   const scale = W / 1080;
   const zoom = 1 + 0.05 * progress;
   const drawW = W * zoom;
   const drawH = (screenshot.height / screenshot.width) * drawW;
 
-  // Défilement : la page descend sur toute la durée de la scène, sans jamais sortir du cadre.
+  // Défilement : la page descend pendant toute la scène, sans jamais sortir du cadre.
+  // `range` dit quelle portion de la page ce plan-là parcourt.
+  const [from, to] = range;
   const travel = Math.max(0, drawH - H);
-  const offsetY = -travel * Math.min(1, progress * 1.15);
+  const offsetY = -travel * Math.min(1, from + (to - from) * Math.min(1, progress * 1.15));
 
   ctx.fillStyle = "#f7f8fb";
   ctx.fillRect(0, 0, W, H);
@@ -511,7 +518,7 @@ export function drawFrame(ctx, context, elapsed) {
   const illustration = scene.bitmap ?? (asWindow ? null : (hero ?? scene.shot?.bitmap));
 
   if (asWindow && scene.shot) {
-    drawSitePage(ctx, scene.shot, site, plan, progress, W, H);
+    drawSitePage(ctx, scene.shot, site, plan, progress, W, H, scene.shotRange);
   } else if (asWindow) {
     // Sans capture, la page est reconstituée avec le vrai visuel et les vrais textes.
     drawBrandBackdrop(ctx, plan, W, H);
@@ -663,10 +670,20 @@ export async function renderVideo({
   // Chaque plan « site » montre une page différente, pour qu'on avance vraiment
   // dans le site au lieu de revoir l'accueil trois fois.
   const pages = tour.filter((shot) => shot?.bitmap);
-  let cursor = position - 1;
+  let shown = 0;
   for (const scene of scenes) {
     const showsSite = scene.role !== "body" || !scene.bitmap;
-    scene.shot = showsSite && pages.length > 0 ? pages[cursor++ % pages.length] : null;
+    scene.shot =
+      scene.pageShot ??
+      (showsSite && pages.length > 0 ? pages[(position - 1 + shown) % pages.length] : null);
+
+    if (scene.shot) {
+      // Chaque plan parcourt une autre portion de la page. Sur un site qui n'a que
+      // ses pages à montrer, c'est ce qui évite de revoir trois fois le même écran.
+      const from = ((shown % 3) * 0.28) % 1;
+      scene.shotRange = [from, Math.min(1, from + 0.5)];
+      shown += 1;
+    }
   }
 
   // Avec `captureStream(0)`, aucune image n'est prélevée automatiquement : c'est nous
