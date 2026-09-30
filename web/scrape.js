@@ -961,11 +961,16 @@ async function tryShot(service, url, width, wait, timeout) {
 }
 
 /**
- * Une capture d'une page. En mode patient on interroge les seuls services qui
- * savent attendre, et on garde la plus fournie des réponses plutôt que la première :
- * entre deux captures de la même page, celle où la carte est arrivée gagne toujours.
+ * Une capture d'une page. En mode patient on n'interroge que les services qui
+ * savent attendre avant de déclencher.
+ *
+ * Une page nette fait gagner tout de suite : attendre les autres services
+ * n'apporterait rien et ajouterait leur lenteur à la nôtre — c'est ce qui faisait
+ * patienter une minute avant la première vidéo alors que la capture était prête au
+ * bout de dix secondes. Ce n'est que si aucune réponse n'est nette qu'on attend
+ * tout le monde, pour garder la moins mauvaise.
  */
-async function bestShot(url, width, wait, patient) {
+function bestShot(url, width, wait, patient) {
   const services = SHOT_SERVICES.filter((service) => !patient || service.patient);
   const timeout = Math.round(wait * 1000) + 22000;
 
@@ -973,12 +978,25 @@ async function bestShot(url, width, wait, patient) {
     return Promise.any(services.map((service) => tryShot(service, url, width, wait, timeout)));
   }
 
-  const settled = await Promise.allSettled(
-    services.map((service) => tryShot(service, url, width, wait, timeout)),
-  );
-  const obtained = settled.filter((entry) => entry.status === "fulfilled").map((entry) => entry.value);
-  if (obtained.length === 0) throw new Error("aucun service n'a rendu de capture");
-  return obtained.sort((a, b) => b.detail - a.detail)[0];
+  return new Promise((resolve, reject) => {
+    let pending = services.length;
+    let best = null;
+
+    const settle = () => {
+      pending -= 1;
+      if (pending > 0) return;
+      if (best) resolve(best);
+      else reject(new Error("aucun service n'a rendu de capture"));
+    };
+
+    for (const service of services) {
+      tryShot(service, url, width, wait, timeout).then((shot) => {
+        if (!best || shot.detail > best.detail) best = shot;
+        if (shot.detail >= LOADED_DETAIL) resolve(shot);
+        settle();
+      }, settle);
+    }
+  });
 }
 
 /**
@@ -1096,6 +1114,11 @@ function pagesToVisit(site, limit, prefer = []) {
 export function startVisit(startUrl, { width = 720, pages = 3, onProgress } = {}) {
   const shots = [];
   const waiting = [];
+  const expected = [];
+  // Les pages que la visite compte photographier, et si elle a fini : de quoi
+  // répondre tout de suite à qui attend une page qui ne viendra pas.
+  let plannedUrls = null;
+  let finished = false;
   let patient = false;
   let kind = null;
 
@@ -1114,7 +1137,16 @@ export function startVisit(startUrl, { width = 720, pages = 3, onProgress } = {}
   const add = (shot, url, label) => {
     if (!shot) return;
     shots.push({ ...shot, url, label, path: pathLabel(url) });
+    // Une attente sans nouvelle ne se distingue pas d'une panne : chaque page
+    // obtenue le dit.
+    onProgress?.(`${shots.length} page(s) photographiée(s) — ${label}`);
     for (const resolve of waiting.splice(0)) resolve(shots);
+
+    // Ceux qui attendaient cette page-là précisément.
+    for (const entry of expected.splice(0)) {
+      if (entry.url === url) entry.resolve();
+      else expected.push(entry);
+    }
   };
 
   const visit = {
@@ -1137,6 +1169,23 @@ export function startVisit(startUrl, { width = 720, pages = 3, onProgress } = {}
       clearTimeout(pagesTimer);
       begin();
       announcePages(pagesToVisit(site, pages, prefer));
+    },
+
+    /**
+     * Attend la capture d'une page précise, sans dépasser `ms`. Le montage d'une
+     * vidéo sur un sujet s'en sert : la page de ce sujet est peut-être encore en
+     * cours de capture, et ouvrir sur l'accueil une vidéo qui parle d'autre chose
+     * serait plus dommageable que ces quelques secondes d'attente.
+     */
+    waitFor(url, ms) {
+      if (!url || shots.some((shot) => shot.url === url)) return Promise.resolve();
+      // Attendre une page que la visite ne prévoit pas — il y a plus de vidéos que
+      // de pages visitées — ne ferait perdre que du temps, une fois par vidéo.
+      if (finished || (plannedUrls && !plannedUrls.has(url))) return Promise.resolve();
+      return new Promise((resolve) => {
+        expected.push({ url, resolve });
+        setTimeout(resolve, ms);
+      });
     },
 
     /** Attend qu'au moins une page soit photographiée, sans dépasser `ms`. */
@@ -1162,6 +1211,7 @@ export function startVisit(startUrl, { width = 720, pages = 3, onProgress } = {}
       ...page,
       label: page.path.replace(/^\//, "").replace(/-/g, " ").slice(0, 28) || "page",
     }));
+    plannedUrls = new Set([startUrl, ...others.map((page) => page.url)]);
     const captured = await Promise.all(
       others.map((page) => capturePage(page.url, { width, isPatient, label: page.label, onProgress })),
     );
@@ -1169,7 +1219,13 @@ export function startVisit(startUrl, { width = 720, pages = 3, onProgress } = {}
     others.forEach((page, index) => add(captured[index], page.url, page.label));
     onProgress?.(`visite terminée : ${shots.length} page(s)`);
     return shots;
-  })().catch(() => shots);
+  })()
+    .catch(() => shots)
+    .finally(() => {
+      finished = true;
+      // Plus rien ne viendra : ceux qui attendaient encore une page sont libérés.
+      for (const entry of expected.splice(0)) entry.resolve();
+    });
 
   return visit;
 }

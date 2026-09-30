@@ -681,11 +681,13 @@ export async function renderVideo({
   let shown = 0;
   for (const scene of scenes) {
     const showsSite = scene.role !== "body" || !scene.bitmap;
-    scene.shot =
-      scene.pageShot ??
-      (showsSite && pages.length > 0
-        ? (own ?? pages[(position - 1 + shown) % pages.length])
-        : null);
+    // Une scène montre une page soit parce qu'elle en illustre une, soit parce
+    // qu'elle n'a rien d'autre à montrer. Quand la vidéo a sa page à elle, c'est
+    // toujours celle-là : la page attribuée à l'écriture peut dater d'un moment
+    // où la visite n'avait encore photographié que l'accueil.
+    const wantsPage = Boolean(scene.pageShot) || showsSite;
+    const fallback = pages.length > 0 ? pages[(position - 1 + shown) % pages.length] : null;
+    scene.shot = wantsPage ? (own ?? scene.pageShot ?? fallback) : null;
 
     if (scene.shot) {
       // Chaque plan parcourt une autre portion de la page. Sur un site qui n'a que

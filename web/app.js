@@ -360,7 +360,12 @@ form.addEventListener("submit", async (event) => {
 
     // La visite est attendue ici, avant l'écriture : ses pages comptent parmi les
     // visuels, et un site qui n'expose aucune photo — une carte, une application —
-    // n'a qu'elles à montrer. Site ordinaire : on ne retarde rien, 2,5 s au plus.
+    // n'a qu'elles à montrer.
+    //
+    // On n'attend que la *première* page, jamais la visite entière. Les suivantes
+    // continuent d'arriver pendant le montage et rejoignent les vidéos d'après :
+    // les attendre toutes laissait l'écran figé une minute avant la première
+    // vidéo, ce qui ne se distingue pas d'une panne.
     awaitingVisit = true;
     if (site.interactive) {
       say(
@@ -369,10 +374,8 @@ form.addEventListener("submit", async (event) => {
           : "Le site se construit tout seul : on attend qu'il soit affiché avant de le filmer…",
       );
       if (visitNote) say(`Visite du site — ${visitNote}`);
-      await Promise.race([visit.done, new Promise((resolve) => setTimeout(resolve, 60000))]);
-    } else {
-      await visit.ready(2500);
     }
+    await visit.ready(site.interactive ? 30000 : 2500);
     awaitingVisit = false;
     stage(
       "visite du site",
@@ -447,6 +450,16 @@ form.addEventListener("submit", async (event) => {
     // vient son sujet, un modèle non — et c'est cette page qui illustre la vidéo.
     attachSubjectPages(plan, site);
     illustrateScenes(plan, site);
+
+    // Un plan sans vidéo finirait en silence sur « 0 vidéo prête », ce qui ne se
+    // distingue pas d'une panne. Mieux vaut le dire, et dire quoi faire.
+    if (!plan.videos || plan.videos.length === 0) {
+      throw new Error(
+        `Aucun script n'a pu être écrit à partir de ${site.domain}. La page a bien été lue, mais ` +
+          "elle n'a donné ni fiche, ni section, ni texte exploitable. Essayez l'adresse d'une page " +
+          "de contenu du site plutôt que sa page d'accueil.",
+      );
+    }
     stage("écriture des scripts", `${plan.videos.length} vidéo(s), par ${writtenBy}`);
     const via = preferredSource();
     say(`${plan.videos.length} vidéo(s) à monter pour ${plan.brandName}${via ? ` (lu via ${via})` : ""}.`);
@@ -462,6 +475,15 @@ form.addEventListener("submit", async (event) => {
     stageArea.hidden = false;
     for (const [index, video] of plan.videos.entries()) {
       const position = index + 1;
+
+      // La page du sujet est peut-être encore en cours de capture : on lui laisse
+      // un court délai. Sans cela, une vidéo sur un saint s'ouvrait sur l'accueil
+      // du site simplement parce que sa page n'était pas arrivée à temps.
+      if (video.pageUrl) {
+        say(`Vidéo ${position}/${plan.videos.length} — on attend la page du sujet…`);
+        await visit.waitFor(video.pageUrl, 12000);
+      }
+
       const file = await renderVideo({
         video,
         plan,
