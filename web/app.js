@@ -17,6 +17,19 @@ import { isSupported, renderVideo } from "./render.js";
 import { MOOD_NAMES } from "./audio.js";
 import { providerForKey, writeWithModel } from "./llm.js";
 import { keepScreenAwake, releaseScreen, screenIsAwake } from "./ticker.js";
+import {
+  closeStaleJobs,
+  forgetEverything,
+  forgetVideo,
+  memoryAvailable,
+  memoryUsage,
+  rememberVideo,
+  holdJob,
+  rememberedVideos,
+  startJob,
+  touchJob,
+  updateJob,
+} from "./memory.js";
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -149,6 +162,23 @@ window.addEventListener("beforeunload", (event) => {
   event.returnValue = "";
 });
 
+$("#forget-all").addEventListener("click", async () => {
+  if (!window.confirm("Effacer toutes les vidéos gardées sur cet appareil ?")) return;
+  await forgetEverything();
+  await refreshLibrary();
+});
+
+// Au chargement : on rouvre la mémoire, on signale une génération restée en plan,
+// et on réaffiche les vidéos déjà produites.
+void (async () => {
+  if (!(await memoryAvailable())) {
+    libraryNote.textContent = "";
+    return;
+  }
+  await reportInterrupted();
+  await refreshLibrary();
+})();
+
 if (!isSupported()) {
   warn(
     "Ce navigateur ne sait pas enregistrer une vidéo depuis une page web. " +
@@ -160,6 +190,148 @@ if (!isSupported()) {
 /* ------------------------------------------------------------------ *
  * Résultats
  * ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ *
+ * Mémoire : ce qui a été produit, et ce qui était en train de l'être
+ * ------------------------------------------------------------------ */
+
+const library = $("#library");
+const libraryGrid = $("#library-grid");
+const libraryNote = $("#library-note");
+
+let jobId = null;
+let heartbeat = null;
+let releaseJob = () => {};
+
+/** Une vidéo de six cents kilooctets ne doit pas s'afficher « 0 Mo ». */
+function formatBytes(bytes) {
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} Go`;
+  if (bytes >= 10 * 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)} Mo`;
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} Mo`;
+  return `${Math.max(1, Math.round(bytes / 1024))} Ko`;
+}
+
+function formatDate(stamp) {
+  try {
+    return new Date(stamp).toLocaleString("fr-FR", {
+      day: "numeric",
+      month: "long",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return "";
+  }
+}
+
+/** Une vidéo de la mémoire, rejouable et téléchargeable comme au premier jour. */
+function libraryCard(entry) {
+  const card = document.createElement("article");
+  card.className = "video-card";
+
+  const player = document.createElement("video");
+  player.src = URL.createObjectURL(entry.blob);
+  player.poster = entry.thumbnail;
+  player.controls = true;
+  player.playsInline = true;
+  player.preload = "none";
+
+  const body = document.createElement("div");
+  body.className = "video-body";
+
+  const title = document.createElement("h3");
+  title.textContent = entry.title || entry.slug;
+
+  const kept = document.createElement("p");
+  kept.className = "kept";
+  kept.textContent =
+    `${entry.domain} — ${formatDate(entry.createdAt)} — ` +
+    `${Math.round(entry.durationSeconds)} s — ${formatBytes(entry.bytes)}`;
+
+  const description = document.createElement("pre");
+  description.className = "desc";
+  description.textContent = `${entry.description}\n\n${(entry.hashtags ?? [])
+    .map((tag) => `#${tag}`)
+    .join(" ")}`;
+
+  const actions = document.createElement("div");
+  actions.className = "actions";
+
+  const download = document.createElement("a");
+  download.href = player.src;
+  download.download = `${String(entry.position).padStart(2, "0")}-${entry.slug}.${entry.extension}`;
+  download.textContent = "Enregistrer la vidéo";
+  download.className = "primary";
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.textContent = "Retirer de la mémoire";
+  remove.addEventListener("click", async () => {
+    await forgetVideo(entry.id);
+    URL.revokeObjectURL(player.src);
+    await refreshLibrary();
+  });
+
+  actions.append(download, remove);
+  body.append(title, kept, description, actions);
+  card.append(player, body);
+  return card;
+}
+
+async function refreshLibrary() {
+  let entries = [];
+  try {
+    entries = await rememberedVideos();
+  } catch {
+    library.hidden = true;
+    return;
+  }
+
+  libraryGrid.replaceChildren(...entries.map(libraryCard));
+  library.hidden = entries.length === 0;
+  if (entries.length === 0) return;
+
+  const { bytes, quota } = await memoryUsage();
+  libraryNote.textContent =
+    `${entries.length} vidéo(s) gardée(s) sur cet appareil, ${formatBytes(bytes)}` +
+    `${quota ? ` sur ${formatBytes(quota)} disponibles` : ""}. ` +
+    "Elles restent après un rechargement, et ne quittent jamais votre navigateur.";
+}
+
+/**
+ * Au retour, une génération encore marquée « en cours » n'a pas survécu à la
+ * fermeture de la page. On le dit, on rappelle ce qui a été sauvé, et on propose
+ * de reprendre là où on en était plutôt que de laisser l'utilisateur deviner.
+ */
+async function reportInterrupted() {
+  let stale = [];
+  try {
+    stale = await closeStaleJobs();
+  } catch {
+    return;
+  }
+  const last = stale[0];
+  if (!last) return;
+
+  const box = document.createElement("div");
+  box.className = "resume";
+  box.textContent =
+    `Une génération a été interrompue le ${formatDate(last.startedAt)} : ` +
+    `${last.done} vidéo(s) sur ${last.total || "?"} avaient été montées, et elles sont ` +
+    "gardées ci-dessous. Le reste n'a pas pu être fabriqué.";
+
+  const again = document.createElement("button");
+  again.type = "button";
+  again.textContent = "Reprendre cette génération";
+  again.addEventListener("click", () => {
+    $("#url").value = last.url ?? "";
+    $("#brief").value = last.brief ?? "";
+    form.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
+  box.append(again);
+  form.before(box);
+}
 
 function addResult(video, file, index) {
   const card = document.createElement("article");
@@ -473,6 +645,14 @@ form.addEventListener("submit", async (event) => {
 
     let voiceFailed = false;
     stageArea.hidden = false;
+    jobId = await startJob({ url, brief, total: plan.videos.length }).catch(() => null);
+    // Signe de vie régulier : c'est lui qui distingue une génération en cours
+    // d'une génération abandonnée, y compris vue depuis un autre onglet.
+    clearInterval(heartbeat);
+    heartbeat = setInterval(() => void touchJob(jobId), 15000);
+    // Le verrou meurt avec l'onglet : c'est lui qui dira, au retour, que cette
+    // génération a été interrompue plutôt qu'elle tourne encore ailleurs.
+    releaseJob = holdJob(jobId);
     for (const [index, video] of plan.videos.entries()) {
       const position = index + 1;
 
@@ -505,6 +685,37 @@ form.addEventListener("submit", async (event) => {
         },
       });
       addResult(video, file, position);
+
+      // Écrite tout de suite, pas à la fin du lot : une interruption au montage de
+      // la suivante laisse celle-ci intacte.
+      try {
+        await rememberVideo({
+          jobId,
+          domain: site.domain,
+          siteUrl: site.url,
+          brief,
+          title: video.youtubeTitle,
+          description: video.youtubeDescription,
+          hashtags: video.hashtags,
+          slug: video.slug,
+          position,
+          durationSeconds: file.durationSeconds,
+          extension: file.extension,
+          width: canvas.width,
+          height: canvas.height,
+          spokenScenes: file.spokenScenes,
+          totalScenes: file.totalScenes,
+          thumbnail: file.thumbnail,
+          blob: file.blob,
+        });
+        await updateJob(jobId, { done: position, stage: `vidéo ${position} montée` });
+      } catch (error) {
+        warn(
+          `La vidéo ${position} n'a pas pu être gardée en mémoire (${error.message}). ` +
+            "Elle reste téléchargeable ci-dessus, mais elle disparaîtra si vous rechargez la page.",
+        );
+      }
+
       stage(
         `montage vidéo ${position}`,
         `${file.durationSeconds} s — voix ${file.spokenScenes}/${file.totalScenes}`,
@@ -541,16 +752,25 @@ form.addEventListener("submit", async (event) => {
       ].join("\n"),
     );
     stageArea.hidden = true;
+    await updateJob(jobId, { status: "terminé", stage: "terminé" });
     say(`${plan.videos.length} vidéo(s) prête(s). Enregistrez-les puis publiez-les.`, "done");
   } catch (error) {
     stageArea.hidden = true;
+    // La génération s'arrête, mais ce qui a déjà été monté reste en mémoire :
+    // l'état enregistré doit le dire, sinon le relevé au retour serait faux.
+    await updateJob(jobId, { status: "arrêté", stage: "arrêté", error: String(error.message) });
     say("La génération s'est arrêtée.", "error");
     warn(explain(error, url));
     showReport(null, `arrêt : ${error.message}`);
   } finally {
     clearInterval(elapsedTimer);
+    clearInterval(heartbeat);
+    releaseJob();
+    releaseJob = () => {};
     submit.disabled = false;
     running = false;
+    jobId = null;
     await releaseScreen();
+    await refreshLibrary();
   }
 });

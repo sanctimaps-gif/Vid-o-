@@ -396,3 +396,56 @@ footer {
   white-space: pre;
   color: var(--text);
 }
+
+/* ------------------------------------------------------------------ *
+ * Mémoire : les vidéos gardées d'une visite à l'autre
+ * ------------------------------------------------------------------ */
+
+.library-head {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.library-head h2 {
+  margin: 0;
+}
+
+button.ghost {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 9px 14px;
+  width: auto;
+}
+
+button.ghost:hover {
+  color: var(--text);
+}
+
+.video-card .kept {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Reprise d'une génération interrompue : un état, pas une erreur. */
+.resume {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.5;
+  margin-bottom: 18px;
+  padding: 14px 16px;
+}
+
+.resume button {
+  margin-top: 10px;
+  width: auto;
+}

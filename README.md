@@ -209,6 +209,25 @@ Pour voir ce qui est utilisable chez vous :
 npm run doctor
 ```
 
+## La mémoire
+
+Sur la page navigateur, chaque vidéo est écrite dans le stockage hors ligne du navigateur
+(IndexedDB) **dès qu'elle est prête**, pas à la fin du lot. Conséquences :
+
+- fermer l'onglet, recharger la page ou manquer de mémoire au montage de la quatrième ne fait plus
+  perdre les trois premières ;
+- au retour, la section **Mémoire** les réaffiche, rejouables et téléchargeables ;
+- une génération qui n'est pas allée au bout est signalée, avec le nombre de vidéos sauvées et un
+  bouton qui repose l'adresse et la consigne pour la relancer.
+
+Les vidéos ne quittent jamais l'appareil. Les vingt-quatre dernières sont gardées ; au-delà, les
+plus anciennes cèdent la place, et « Tout effacer » vide la mémoire d'un coup. Si le stockage est
+refusé — navigation privée, place insuffisante — la génération se poursuit et Vid-O prévient que
+les vidéos ne survivront pas au rechargement.
+
+Sur la version ordinateur, la mémoire est le dossier de sortie : les fichiers y restent, avec leur
+`plan.json` et leur `A-POSTER.md`.
+
 ## Musique de fond
 
 **Sur la page navigateur**, aucune musique n'est ajoutée par défaut. Vous pouvez fournir votre
