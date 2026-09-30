@@ -28,6 +28,39 @@ out/ma-boutique-fr-2026-09-091132/
 └── A-POSTER.md             tous les titres et descriptions à copier-coller
 ```
 
+## Deux façons de faire une vidéo
+
+**Composer** (`vido "<url>" "<consigne>"`, et la page navigateur) : Vid-O lit le site, en tire
+des textes et des images, écrit des scripts et monte des plans avec sous-titres et voix off.
+
+**Filmer** (`vido tour <url>`) : Vid-O ouvre votre site dans un vrai navigateur et s'en sert
+devant la caméra — la carte qu'on déplace, le repère qu'on ouvre, la page qu'on parcourt — puis
+ajoute une carte de fin à vos couleurs et votre musique. C'est le mode à utiliser pour montrer
+une **interface en fonctionnement** : une carte interactive, une application. Aucune capture
+d'écran fixe ne remplace le mouvement réel de votre site.
+
+```bash
+npm install playwright && npx playwright install chromium
+npm run tour -- "https://ma-carte.fr" --seconds 20 --music ./assets/music/calme.mp3
+```
+
+> **La page navigateur ne peut pas filmer.** Le JavaScript d'un site n'a pas le droit de lire les
+> pixels d'un autre site : ni iframe, ni canvas, aucune méthode. Filmer exige un navigateur qu'on
+> pilote, donc un ordinateur — ou l'action GitHub ci-dessous, qui le fait pour vous.
+
+### Depuis un téléphone, sans rien installer
+
+Le dépôt contient une action GitHub « Visite filmée ». Ouvrez l'onglet **Actions** du dépôt,
+choisissez-la, saisissez l'adresse de votre site et lancez-la : GitHub ouvre le navigateur à votre
+place et vous rend le MP4 dans les fichiers joints à l'exécution.
+
+| | Composer | Filmer |
+| --- | --- | --- |
+| Ce qu'on voit | vos visuels, vos textes, des plans montés | votre site en train d'être utilisé |
+| Sous-titres et voix off | oui | non, musique seule |
+| Convient à | une boutique, un catalogue, un site de contenu | une carte, une application, toute interface |
+| Où ça tourne | navigateur ou ordinateur | ordinateur, ou l'action GitHub |
+
 ## Comment ça marche
 
 1. **Lecture du site.** Vid-O explore votre site : catalogue Shopify ou WooCommerce quand il y en a
@@ -107,6 +140,24 @@ Après un `npm run build`, la commande `vido` est disponible directement.
 | `--music ./assets/music` | Dossier de musiques de fond |
 | `--plan plan.json` | Refabrique les vidéos depuis un plan existant, sans rappeler le modèle |
 | `--writer ollama` | Choisit le rédacteur des scripts (voir ci-dessous) |
+
+### Filmer une visite
+
+```bash
+npm run tour -- "https://ma-carte.fr" --seconds 20 --music ./musique.mp3
+```
+
+| Option | Effet |
+| --- | --- |
+| `--seconds 20` | Durée de la visite, avant la carte de fin |
+| `--width 540` | Largeur du viewport en pixels CSS ; 540 donne une mise en page de téléphone |
+| `--music ./x.mp3` | Musique de fond, un fichier dont vous détenez les droits |
+| `--tagline "…"` | Phrase de la carte de fin ; par défaut, la description de votre site |
+| `--no-end-card` | Termine sur le site, sans carte de fin |
+
+Vid-O repère le conteneur de carte (Leaflet, Mapbox, MapLibre, OpenLayers), attend qu'il ait fini
+de se dessiner, puis déplace, zoome et ouvre un repère. Sans carte, il parcourt la page. La carte
+de fin reprend le nom, la description et le visuel déclarés par votre site.
 
 `--plan` est pratique pour retoucher un script à la main : ouvrez le `plan.json` d'une campagne,
 corrigez une phrase, relancez. Aucun appel au modèle, donc aucun coût.

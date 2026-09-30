@@ -1,0 +1,67 @@
+# Visite filmée d'un site, lancée depuis GitHub.
+#
+# Filmer un site en fonctionnement demande un vrai navigateur, ce qu'un téléphone
+# ne peut pas faire. Cette action l'exécute chez GitHub : on la lance depuis
+# l'onglet « Actions » du dépôt, y compris depuis un téléphone, et on récupère le
+# MP4 dans les fichiers joints à l'exécution.
+name: Visite filmée
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Adresse du site à filmer"
+        required: true
+        default: "https://sanctimaps.fr/"
+      seconds:
+        description: "Durée de la visite, avant la carte de fin"
+        required: false
+        default: "22"
+      width:
+        description: "Largeur du viewport en pixels CSS (540 = téléphone)"
+        required: false
+        default: "540"
+      tagline:
+        description: "Phrase de la carte de fin (vide = la description du site)"
+        required: false
+        default: ""
+
+jobs:
+  visite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Installer les dépendances
+        run: npm ci
+
+      - name: Installer le navigateur
+        run: npx playwright install --with-deps chromium
+
+      - name: Installer FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Filmer la visite
+        run: |
+          npx tsx src/cli.ts tour "${{ inputs.url }}" \
+            --seconds "${{ inputs.seconds }}" \
+            --width "${{ inputs.width }}" \
+            ${{ inputs.tagline && format('--tagline "{0}"', inputs.tagline) || '' }} \
+            --out out
+
+      - name: Récupérer la vidéo
+        uses: actions/upload-artifact@v4
+        with:
+          name: visite
+          path: |
+            out/**/*.mp4
+            out/**/visite.json
+          if-no-files-found: error
+          retention-days: 30

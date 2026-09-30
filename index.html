@@ -220,6 +220,31 @@
       </section>
 
       <section class="card explain">
+        <h2>Filmer votre site en fonctionnement</h2>
+        <p>
+          Cette page <strong>compose</strong> des vidéos : elle lit votre site, en tire textes et
+          images, et monte des plans. Pour montrer une <strong>interface qui bouge</strong> — une
+          carte qu'on déplace, un repère qu'on ouvre, une recherche qu'on saisit — il faut
+          <strong>filmer</strong> le site pendant qu'on s'en sert. Vid-O sait le faire, mais pas
+          depuis cette page : le JavaScript d'un site n'a pas le droit de lire les pixels d'un
+          autre site, ni par iframe ni autrement. Il faut un navigateur qu'on pilote.
+        </p>
+        <p>
+          <strong>Depuis un téléphone :</strong> ouvrez l'onglet
+          <a href="https://github.com/sanctimaps-gif/Vid-o-/actions">Actions du dépôt</a>, lancez
+          « Visite filmée », saisissez l'adresse de votre site. GitHub ouvre le navigateur à votre
+          place et vous rend le MP4 dans les fichiers joints à l'exécution.
+        </p>
+        <pre><code>npm install playwright &amp;&amp; npx playwright install chromium
+npm run tour -- "https://ma-carte.fr" --seconds 20 --music ./musique.mp3</code></pre>
+        <p>
+          Vid-O repère le conteneur de carte, attend qu'il ait fini de se dessiner, puis déplace,
+          zoome et ouvre un repère — et termine sur une carte de fin reprenant le nom et la
+          description de votre site, avec votre musique.
+        </p>
+      </section>
+
+      <section class="card explain">
         <h2>La version ordinateur</h2>
         <p>
           Cette page monte des vidéos complètes, voix off et musique comprises. La version

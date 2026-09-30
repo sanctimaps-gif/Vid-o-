@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import { config } from "./config.js";
 import { generateCampaign } from "./pipeline.js";
 import { startServer } from "./server.js";
+import { generateTour } from "./record/index.js";
 import { edgeTtsAvailable } from "./tts/index.js";
 import { writerStatus } from "./ai/writer.js";
 import { ffmpegVersion, hasFilter } from "./render/ffmpeg.js";
@@ -16,7 +17,7 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-  const known = new Set(["generate", "serve", "doctor", "help"]);
+  const known = new Set(["generate", "tour", "serve", "doctor", "help"]);
   const first = argv[0];
   const command = first && known.has(first) ? first : "generate";
   const rest = first && known.has(first) ? argv.slice(1) : argv;
@@ -52,6 +53,7 @@ Vid-O — génère des Shorts YouTube prêts à poster à partir d'un site web.
 
   vido "<url du site>" "<consigne>" [options]
   vido generate --url <url> --brief "<consigne>" [options]
+  vido tour <url> [options]
   vido serve [--port 4173] [--out ./out]
   vido doctor
 
@@ -68,8 +70,25 @@ Options de génération
                      groq, gemini, openrouter, mistral, custom, anthropic.
                      Tous sont gratuits sauf anthropic.
 
+Visite filmée (vido tour)
+  Filme votre site en fonctionnement, dans un vrai navigateur : la carte qu'on
+  déplace, le repère qu'on ouvre, la page qu'on parcourt. C'est le mode à utiliser
+  pour montrer une interface, là où « generate » compose des plans à partir des
+  textes et des images du site.
+
+  --seconds <n>      Durée de la visite avant la carte de fin (défaut : 22)
+  --width <n>        Largeur du viewport en pixels CSS (défaut : 540)
+  --music <fichier>  Musique de fond, un fichier dont vous avez les droits
+  --tagline <texte>  Phrase de la carte de fin (défaut : la description du site)
+  --no-end-card      Termine sur le site, sans carte de fin
+  --out <dossier>    Dossier de sortie (défaut : ./out)
+
+  Nécessite Playwright et Chromium :
+    npm install playwright && npx playwright install chromium
+
 Exemple
   vido "https://ma-boutique.fr" "fais découvrir les 5 meilleures tenues du magasin, une vidéo par tenue"
+  vido tour "https://ma-carte.fr" --seconds 20 --music ./assets/music/calme.mp3
 `;
 
 async function commandGenerate(args: Args): Promise<void> {
@@ -113,6 +132,37 @@ async function commandGenerate(args: Args): Promise<void> {
   console.log("");
   log.info(`Dossier : ${result.outDir}`);
   log.info("Titres et descriptions : A-POSTER.md");
+}
+
+async function commandTour(args: Args): Promise<void> {
+  const url = args.flags.get("url") ?? args.positional[0];
+  if (!url) {
+    log.error("Il faut l'adresse du site à filmer.");
+    console.log(HELP);
+    process.exitCode = 1;
+    return;
+  }
+
+  const seconds = Number(args.flags.get("seconds"));
+  const width = Number(args.flags.get("width"));
+  const started = Date.now();
+
+  const result = await generateTour({
+    url,
+    outDir: args.flags.get("out") ?? "out",
+    seconds: Number.isFinite(seconds) && seconds > 4 ? Math.round(seconds) : undefined,
+    width: Number.isFinite(width) && width >= 320 ? Math.round(width) : undefined,
+    music: args.flags.get("music") ?? null,
+    tagline: args.flags.get("tagline"),
+    endCard: args.flags.get("no-end-card") === undefined,
+    onProgress: (message) => log.step(message),
+  });
+
+  console.log("");
+  log.success(`visite filmée en ${Math.round((Date.now() - started) / 1000)}s`);
+  log.info(`${path.basename(result.file)} — ${result.seconds.toFixed(1)}s — ${result.siteName}`);
+  log.info(`ce qui a été filmé : ${result.steps.join(" · ")}`);
+  log.info(`Fichier : ${result.file}`);
 }
 
 async function commandDoctor(): Promise<void> {
@@ -218,6 +268,9 @@ async function main(): Promise<void> {
       startServer(outDir, port);
       return;
     }
+    case "tour":
+      await commandTour(args);
+      break;
     case "doctor":
       await commandDoctor();
       return;

@@ -13,7 +13,8 @@
     "serve": "tsx src/cli.ts serve",
     "doctor": "tsx src/cli.ts doctor",
     "start": "node dist/cli.js serve",
-    "smoke": "tsx scripts/smoke-render.ts"
+    "smoke": "tsx scripts/smoke-render.ts",
+    "tour": "tsx src/cli.ts tour"
   },
   "engines": {
     "node": ">=20"
@@ -30,5 +31,8 @@
     "@types/node": "^26.5.0",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3"
+  },
+  "optionalDependencies": {
+    "playwright": "^1.56.1"
   }
 }
