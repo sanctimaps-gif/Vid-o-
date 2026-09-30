@@ -549,18 +549,25 @@ button.ghost:hover {
 
 /* Reprise d'une génération interrompue : un état, pas une erreur. */
 .resume {
+  align-items: flex-start;
   background: var(--panel-2);
   border: 1px solid var(--line);
   border-left: 3px solid var(--accent);
   border-radius: 10px;
   color: var(--text);
+  /* En colonne : sans cela le bouton se glissait au milieu de la phrase, le
+     texte reprenant après lui sur la même ligne. */
+  display: flex;
+  flex-direction: column;
   font-size: 15px;
+  gap: 12px;
   line-height: 1.5;
   margin-bottom: 18px;
   padding: 14px 16px;
 }
 
 .resume button {
-  margin-top: 10px;
+  font-size: 15px;
+  padding: 11px 18px;
   width: auto;
 }
