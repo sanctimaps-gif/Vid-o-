@@ -152,12 +152,22 @@ npm run tour -- "https://ma-carte.fr" --seconds 20 --music ./musique.mp3
 | `--seconds 20` | Durée de la visite, avant la carte de fin |
 | `--width 540` | Largeur du viewport en pixels CSS ; 540 donne une mise en page de téléphone |
 | `--music ./x.mp3` | Musique de fond, un fichier dont vous détenez les droits |
+| `--search "Saint"` | Ce qu'on tape dans la recherche du site ; par défaut, un mot déduit du site |
 | `--tagline "…"` | Phrase de la carte de fin ; par défaut, la description de votre site |
 | `--no-end-card` | Termine sur le site, sans carte de fin |
 
 Vid-O repère le conteneur de carte (Leaflet, Mapbox, MapLibre, OpenLayers), attend qu'il ait fini
-de se dessiner, puis déplace, zoome et ouvre un repère. Sans carte, il parcourt la page. La carte
-de fin reprend le nom, la description et le visuel déclarés par votre site.
+de se dessiner, puis **se sert du site** : il déplace la carte, zoome, ouvre un repère, va chercher
+la recherche — y compris derrière un menu —, **tape la requête lettre par lettre**, laisse la liste
+se remplir et ouvre un résultat. C'est une démonstration de ce que votre site sait faire, pas
+seulement une vue de ce à quoi il ressemble. Sans carte, il fait la même chose puis parcourt la
+page.
+
+Le mot recherché est déduit du site lui-même : celui qui revient le plus souvent en tête de ses
+intitulés, de ses repères ou de leurs `title`. Une requête inventée ne ramènerait rien, et une
+démonstration qui affiche « aucun résultat » dessert le site. `--search` permet de l'imposer.
+
+La carte de fin reprend le nom, la description et le visuel déclarés par votre site.
 
 `--plan` est pratique pour retoucher un script à la main : ouvrez le `plan.json` d'une campagne,
 corrigez une phrase, relancez. Aucun appel au modèle, donc aucun coût.

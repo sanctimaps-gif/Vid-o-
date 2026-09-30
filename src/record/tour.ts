@@ -25,6 +25,8 @@ export interface TourOptions {
   width?: number;
   /** Secondes laissées à la page avant de commencer à filmer. */
   settle?: number;
+  /** Ce qu'on tape dans la recherche. Sans valeur, un mot du site est déduit. */
+  search?: string;
   onProgress?: (message: string) => void;
 }
 
@@ -79,6 +81,76 @@ const MARKER_SELECTORS = [
   "[class*='pin']",
 ];
 
+/** Champs de recherche, du plus explicite au plus approximatif. */
+const SEARCH_INPUTS = [
+  "input[type='search']",
+  "input[name*='search' i]",
+  "input[name*='recherche' i]",
+  "input[placeholder*='recherch' i]",
+  "input[placeholder*='search' i]",
+  "[role='searchbox']",
+  "[class*='search'] input",
+  "#search input, input#search, input#q",
+];
+
+/** Ce qui ouvre une recherche quand le champ n'est pas déjà à l'écran. */
+const SEARCH_TRIGGERS = [
+  "[aria-label*='recherch' i]",
+  "[aria-label*='search' i]",
+  "button[class*='search' i]",
+  "[class*='search-button' i]",
+  "[class*='searchButton' i]",
+];
+
+/** Ce qui ouvre un menu, quand la recherche y est rangée. */
+const MENU_TRIGGERS = [
+  "[aria-label*='menu' i]",
+  "button[class*='burger' i]",
+  "button[class*='hamburger' i]",
+  "[class*='menu-toggle' i]",
+  "header button",
+];
+
+/** Ce qui ressemble à un résultat de recherche cliquable. */
+const RESULT_SELECTORS = [
+  "[class*='result'] a",
+  "[class*='result'] li",
+  "[class*='resultat'] a",
+  "[role='option']",
+  "[class*='suggestion'] a, [class*='suggestion'] li",
+  "ul li a",
+];
+
+/**
+ * Premier élément visible et cliquable parmi une liste de sélecteurs.
+ *
+ * La largeur et la hauteur ont des exigences distinctes : un champ de recherche
+ * est large et plat, et un seuil unique de 60 px le rejetait sur sa hauteur.
+ */
+async function firstVisible(
+  page: any,
+  selectors: string[],
+  minWidth = 8,
+  minHeight = 8,
+): Promise<any | null> {
+  const view = page.viewportSize() ?? { width: 540, height: 960 };
+
+  for (const selector of selectors) {
+    const found = page.locator(selector).first();
+    const visible = await found.isVisible().catch(() => false);
+    if (!visible) continue;
+    const box = await found.boundingBox().catch(() => null);
+    if (!box || box.width < minWidth || box.height < minHeight) continue;
+    // `isVisible` se contente d'un élément dessiné : un panneau simplement décalé
+    // hors du cadre le satisfait encore. On exige donc qu'il soit dans la fenêtre,
+    // sans quoi on croyait tenir un champ de recherche invisible à l'écran.
+    const inside =
+      box.x + box.width > 4 && box.x < view.width - 4 && box.y + box.height > 4 && box.y < view.height - 4;
+    if (inside) return found;
+  }
+  return null;
+}
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -106,6 +178,177 @@ async function zoom(page: any, at: [number, number], direction: 1 | -1, notches 
   }
 }
 
+/**
+ * Un mot à taper dans la recherche, déduit du site lui-même.
+ *
+ * Une requête inventée ne donne aucun résultat, et une démonstration qui affiche
+ * « aucun résultat » dessert le site. On prend donc le mot qui revient le plus en
+ * tête des intitulés de la page — « Saint » sur un site de saints — puisque c'est
+ * celui qui a le plus de chances de ramener plusieurs entrées.
+ */
+async function deriveQuery(page: any): Promise<string | null> {
+  // Les intitulés ne sont pas toujours du texte : un repère de carte porte souvent
+  // son nom en `title`, `aria-label` ou `alt`, et son contenu visible n'est qu'un
+  // pictogramme. On ramasse les deux.
+  const texts: string[] = await page
+    .$$eval("a, [class*='marker'], [class*='pin'], [class*='item'], li, [title], [aria-label], img[alt]", (
+      nodes: Element[],
+    ) =>
+      nodes
+        .flatMap((node) => [
+          (node.textContent || "").replace(/\s+/g, " ").trim(),
+          (node.getAttribute("title") || "").trim(),
+          (node.getAttribute("aria-label") || "").trim(),
+          (node.getAttribute("alt") || "").trim(),
+        ])
+        .filter((text) => text.length > 3 && text.length < 60)
+        .slice(0, 400),
+    )
+    .catch(() => [] as string[]);
+
+  const counts = new Map<string, number>();
+  for (const text of texts) {
+    const word = text.split(" ")[0]?.replace(/[^\p{L}\p{N}'-]/gu, "") ?? "";
+    if (word.length < 4) continue;
+    counts.set(word, (counts.get(word) ?? 0) + 1);
+  }
+
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  const best = ranked[0];
+  // Un mot qui n'apparaît qu'une fois ne prouve rien : mieux vaut ne pas chercher.
+  if (best && best[1] >= 2) return best[0];
+
+  // Rien de répété dans les intitulés : on se rabat sur le mot propre le plus
+  // fréquent du texte de la page, qui reste un terme que le site connaît.
+  const words: string[] = await page
+    .evaluate(() => (document.body.innerText || "").split(/\s+/).slice(0, 4000))
+    .catch(() => [] as string[]);
+
+  const proper = new Map<string, number>();
+  for (const raw of words) {
+    const word = raw.replace(/[^\p{L}\p{N}'-]/gu, "");
+    if (word.length < 4 || word.length > 20) continue;
+    if (!/^\p{Lu}/u.test(word)) continue;
+    proper.set(word, (proper.get(word) ?? 0) + 1);
+  }
+  const bestProper = [...proper.entries()].sort((a, b) => b[1] - a[1])[0];
+  return bestProper && bestProper[1] >= 2 ? bestProper[0] : null;
+}
+
+/**
+ * Saisit la requête lettre par lettre. Coller le texte d'un coup ne déclenche pas
+ * toujours les gestionnaires de saisie, et à l'image la recherche n'aurait l'air
+ * de rien : c'est la liste qui se resserre au fil des lettres qui fait la
+ * démonstration.
+ */
+async function typeQuery(input: any, text: string): Promise<void> {
+  await input.click({ timeout: 4000 });
+  await sleep(500);
+  if (typeof input.pressSequentially === "function") {
+    await input.pressSequentially(text, { delay: 140 });
+  } else {
+    await input.type(text, { delay: 140 });
+  }
+}
+
+/**
+ * Démonstration de la recherche : on ouvre le champ — en passant par le menu s'il
+ * y est rangé —, on tape, on laisse la liste se remplir, puis on ouvre un
+ * résultat. Chaque étape peut manquer sans faire échouer la visite : un site sans
+ * recherche est filmé autrement, ce n'est pas une panne.
+ */
+async function demoSearch(
+  page: any,
+  options: { query?: string; steps: string[]; onProgress?: (message: string) => void },
+): Promise<boolean> {
+  const { steps, onProgress } = options;
+
+  let input = await firstVisible(page, SEARCH_INPUTS, 120, 24);
+
+  // Champ absent de l'écran : il est peut-être derrière une loupe, ou dans le menu.
+  if (!input) {
+    for (const triggers of [SEARCH_TRIGGERS, MENU_TRIGGERS]) {
+      const trigger = await firstVisible(page, triggers);
+      if (!trigger) continue;
+      await trigger.click({ timeout: 3000 }).catch(() => {});
+      steps.push(triggers === MENU_TRIGGERS ? "ouverture du menu" : "ouverture de la recherche");
+      await sleep(1100);
+      input = await firstVisible(page, SEARCH_INPUTS, 120, 24);
+      if (input) break;
+    }
+  }
+  if (!input) return false;
+
+  const query = options.query || (await deriveQuery(page));
+  if (!query) return false;
+
+  // Ce qui est déjà à l'écran avant la frappe : tout le reste sera du résultat.
+  const before = new Set<string>(
+    await page
+      .$$eval("a, li, [role='option'], [class*='item'], [class*='res'] *", (nodes: Element[]) =>
+        nodes.map((node) =>
+          ((node as HTMLElement).innerText || node.textContent || "").replace(/\s+/g, " ").trim(),
+        ),
+      )
+      .catch(() => [] as string[]),
+  );
+
+  onProgress?.(`recherche « ${query} »`);
+  await typeQuery(input, query).catch(() => {});
+  steps.push(`recherche « ${query} »`);
+  // La liste met un instant à se remplir, et il faut la laisser se lire.
+  await sleep(1800);
+
+  const result = await firstVisible(page, RESULT_SELECTORS, 60, 18);
+  if (result) {
+    await result.scrollIntoViewIfNeeded().catch(() => {});
+    await sleep(400);
+    await result.click({ timeout: 3000 }).catch(() => {});
+    steps.push("ouverture d'un résultat");
+    await sleep(2200);
+    return true;
+  }
+
+  // Les classes des listes de résultats n'ont aucune convention : plutôt que de
+  // deviner des noms, on retient ce qui est apparu pendant la frappe. Un intitulé
+  // qui n'existait pas avant la saisie et qui s'affiche sous le champ est un
+  // résultat, quel que soit le nom que le site lui donne.
+  const opened = await clickNewResult(page, input, before, steps);
+  if (opened) await sleep(2200);
+  return true;
+}
+
+async function clickNewResult(
+  page: any,
+  input: any,
+  before: Set<string>,
+  steps: string[],
+): Promise<boolean> {
+  const view = page.viewportSize() ?? { width: 540, height: 960 };
+  const inputBox = await input.boundingBox().catch(() => null);
+  const candidates = page.locator("a, li, [role='option'], [class*='item'], [class*='res'] *");
+  const total = Math.min(await candidates.count().catch(() => 0), 80);
+
+  for (let index = 0; index < total; index += 1) {
+    const node = candidates.nth(index);
+    if (!(await node.isVisible().catch(() => false))) continue;
+
+    const text = (await node.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
+    if (text.length < 3 || text.length > 120 || before.has(text)) continue;
+
+    const box = await node.boundingBox().catch(() => null);
+    if (!box || box.width < 40 || box.height < 14) continue;
+    if (box.x > view.width - 4 || box.y > view.height - 4 || box.x + box.width < 4) continue;
+    // Une liste de résultats s'affiche sous son champ, jamais au-dessus.
+    if (inputBox && box.y + box.height < inputBox.y) continue;
+
+    await node.click({ timeout: 3000 }).catch(() => {});
+    steps.push(`ouverture du résultat « ${text.split("\n")[0]!.slice(0, 40)} »`);
+    return true;
+  }
+  return false;
+}
+
 /** Attend que la page cesse de bouger : c'est le signe que la carte a fini de se dessiner. */
 async function waitUntilStill(page: any, limitMs: number): Promise<boolean> {
   const deadline = Date.now() + limitMs;
@@ -128,7 +371,7 @@ async function waitUntilStill(page: any, limitMs: number): Promise<boolean> {
 }
 
 export async function recordTour(options: TourOptions): Promise<TourResult> {
-  const { url, outDir, seconds = 22, width = 540, settle = 2.5, onProgress } = options;
+  const { url, outDir, seconds = 22, width = 540, settle = 2.5, search, onProgress } = options;
   const height = Math.round((width * 16) / 9);
   const rawDir = path.join(outDir, "raw");
   await fs.mkdir(rawDir, { recursive: true });
@@ -248,6 +491,13 @@ export async function recordTour(options: TourOptions): Promise<TourResult> {
         }
       }
 
+      // La recherche est la démonstration la plus parlante : elle montre à quoi
+      // sert le site, pas seulement à quoi il ressemble. On lui garde du temps.
+      if (remaining() > 9000) {
+        const searched = await demoSearch(page, { query: search, steps, onProgress });
+        if (searched) await sleep(1400);
+      }
+
       if (remaining() > 5000) {
         await swipe(page, centre, [-width * 0.18, height * 0.12]);
         steps.push("déplacement de la carte");
@@ -263,6 +513,14 @@ export async function recordTour(options: TourOptions): Promise<TourResult> {
     } else {
       steps.push("aucune carte : parcours de la page");
       onProgress?.("parcours de la page");
+
+      // Une recherche vaut aussi sur un site sans carte : c'est encore le geste
+      // qui montre le mieux ce qu'on peut y faire.
+      if (remaining() > 9000) {
+        const searched = await demoSearch(page, { query: search, steps, onProgress });
+        if (searched) await sleep(1200);
+      }
+
       const height2 = await page.evaluate(() => document.body.scrollHeight).catch(() => height);
       const stops = Math.max(2, Math.min(5, Math.round(height2 / height)));
       for (let stop = 1; stop <= stops && remaining() > 3000; stop += 1) {

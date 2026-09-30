@@ -21,6 +21,10 @@ on:
         description: "Largeur du viewport en pixels CSS (540 = téléphone)"
         required: false
         default: "540"
+      search:
+        description: "Ce qu'on tape dans la recherche du site (vide = un mot déduit du site)"
+        required: false
+        default: ""
       tagline:
         description: "Phrase de la carte de fin (vide = la description du site)"
         required: false
@@ -53,6 +57,7 @@ jobs:
           npx tsx src/cli.ts tour "${{ inputs.url }}" \
             --seconds "${{ inputs.seconds }}" \
             --width "${{ inputs.width }}" \
+            ${{ inputs.search && format('--search "{0}"', inputs.search) || '' }} \
             ${{ inputs.tagline && format('--tagline "{0}"', inputs.tagline) || '' }} \
             --out out
 

@@ -79,6 +79,7 @@ Visite filmée (vido tour)
   --seconds <n>      Durée de la visite avant la carte de fin (défaut : 22)
   --width <n>        Largeur du viewport en pixels CSS (défaut : 540)
   --music <fichier>  Musique de fond, un fichier dont vous avez les droits
+  --search <texte>   Ce qu'on tape dans la recherche du site (défaut : un mot déduit du site)
   --tagline <texte>  Phrase de la carte de fin (défaut : la description du site)
   --no-end-card      Termine sur le site, sans carte de fin
   --out <dossier>    Dossier de sortie (défaut : ./out)
@@ -153,6 +154,7 @@ async function commandTour(args: Args): Promise<void> {
     seconds: Number.isFinite(seconds) && seconds > 4 ? Math.round(seconds) : undefined,
     width: Number.isFinite(width) && width >= 320 ? Math.round(width) : undefined,
     music: args.flags.get("music") ?? null,
+    search: args.flags.get("search"),
     tagline: args.flags.get("tagline"),
     endCard: args.flags.get("no-end-card") === undefined,
     onProgress: (message) => log.step(message),

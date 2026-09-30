@@ -15,6 +15,8 @@ export interface TourJobOptions {
   seconds?: number;
   width?: number;
   music?: string | null;
+  /** Ce qu'on tape dans la recherche du site. Sans valeur, un mot du site est déduit. */
+  search?: string;
   /** Phrase de clôture. Sans elle, celle du site est reprise. */
   tagline?: string;
   endCard?: boolean;
@@ -47,6 +49,7 @@ export async function generateTour(options: TourJobOptions): Promise<TourJobResu
     seconds = 22,
     width = 540,
     music = null,
+    search,
     tagline,
     endCard = true,
     onProgress,
@@ -63,6 +66,7 @@ export async function generateTour(options: TourJobOptions): Promise<TourJobResu
     outDir: dir,
     seconds,
     width,
+    search,
     onProgress,
   });
 
