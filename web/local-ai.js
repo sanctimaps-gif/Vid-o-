@@ -17,7 +17,7 @@
  * n'est pas le cas, on le dit et on revient au rédacteur intégré.
  */
 
-import { SYSTEM_PROMPT, coercePlan, describeSite, extractJson } from "./llm.js";
+import { SYSTEM_PROMPT, coercePlan, describeSite, extractJson } from "./prompt.js";
 
 /**
  * Modèles proposés. Deux tailles seulement : au-delà, le téléchargement et la

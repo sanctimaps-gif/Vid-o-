@@ -191,6 +191,8 @@ C'est la seule brique qui pourrait coûter de l'argent, alors elle est interchan
 | --- | --- | --- | --- |
 | `ollama` | [Ollama](https://ollama.com) installé, puis `ollama pull llama3.1:8b` | gratuit, hors ligne, sans compte | très bonne |
 | `groq`, `gemini`, `openrouter`, `mistral` | une clé du palier gratuit, sans carte bancaire | gratuit dans la limite du quota | très bonne |
+
+La page navigateur, elle, ne demande aucune clé : voir « Trois rédacteurs, aucun compte ».
 | `custom` | `VIDO_LLM_BASE_URL` vers un serveur compatible OpenAI (llama.cpp, LM Studio, vLLM) | selon votre serveur | variable |
 | `template` | rien du tout | gratuit, hors ligne | correcte, formulations plus attendues |
 | `anthropic` | `ANTHROPIC_API_KEY` | **facturé à l'usage** | la meilleure |
@@ -228,28 +230,30 @@ les vidéos ne survivront pas au rechargement.
 Sur la version ordinateur, la mémoire est le dossier de sortie : les fichiers y restent, avec leur
 `plan.json` et leur `A-POSTER.md`.
 
-## Un modèle sans clé et sans compte
+## Trois rédacteurs, aucun compte
 
-Sur la page navigateur, le sélecteur **« Qui écrit les scripts »** propose une **IA sur votre
-appareil**. Aucune clé, aucun compte, aucun serveur : le modèle — Qwen 1.5B ou Gemma 2B — est
-téléchargé une seule fois puis gardé en cache, et il travaille sur le processeur graphique de
-l'appareil via WebGPU. Ni votre consigne ni le contenu de votre site ne quittent le navigateur.
+Le sélecteur **« Qui écrit les scripts »** n'a plus de champ de clé : aucune inscription nulle part.
+
+| | Ce que c'est | Ce que ça coûte |
+| --- | --- | --- |
+| **Rédacteur intégré** | des tournures préécrites assemblées à partir du site | rien ; il suit le sujet et le nombre de vidéos, pas une consigne détaillée |
+| **IA sur votre appareil** | Qwen 1.5B ou Gemma 2B, sur votre processeur graphique | 1,1 à 1,6 Go au premier usage, et un appareil qui en est capable |
+| **IA en ligne gratuite** | un grand modèle interrogé sans compte | votre consigne et les données du site sortent du navigateur, et rien ne garantit que le service réponde |
 
 **ChatGPT et Gemini ne s'utilisent pas sans clé.** Leurs adresses refusent toute requête non
-authentifiée, et les passerelles qui prétendent le contraire relaient votre texte chez un tiers
-inconnu, sans garantie ni lendemain. Vid-O n'en utilise aucune : pour se passer de compte, le
-modèle tourne chez vous.
+authentifiée. Les deux options sans compte ci-dessus reposent donc l'une sur un modèle ouvert qui
+tourne chez vous, l'autre sur un service public qui interroge un grand modèle pour vous.
 
-Ce que cela coûte, honnêtement :
+Le choix entre les deux est un arbitrage, pas une hiérarchie :
 
-- **1,1 à 1,6 Go** au premier usage. À faire en Wi-Fi, gardé ensuite sur l'appareil.
-- **WebGPU** : Chrome et Edge l'ont, Safari depuis iOS 18, Firefox derrière une option. Vid-O
-  interroge la carte graphique avant de promettre quoi que ce soit, et le dit quand elle manque.
-- Un petit modèle écrit moins bien qu'un grand. Si la qualité prime, la clé d'un palier gratuit
-  reste supérieure — c'est le troisième choix du sélecteur.
+- **Sur l'appareil** : rien ne quitte le navigateur, rien ne dépend de personne, mais il faut
+  télécharger le modèle et disposer de WebGPU — Chrome, Edge, Safari depuis iOS 18.
+- **En ligne** : rien à télécharger et un modèle bien plus gros, mais la demande part chez un tiers.
+  Un service gratuit l'est parce que quelqu'un d'autre paie : ni sa disponibilité, ni ses quotas, ni
+  sa durée de vie ne sont garantis. Vid-O essaie plusieurs services, puis retombe sur le rédacteur
+  intégré.
 
-Dans tous les cas, l'échec est sans conséquence : le rédacteur intégré prend le relais et les
-vidéos sont produites quand même.
+Dans tous les cas l'échec est sans conséquence : les vidéos sont produites quand même.
 
 Le modèle reçoit aussi **ce que la vidéo montrera** : les pages du site qui ont été filmées, et le
 nombre d'images exploitables. Le texte parle donc de ce qui est à l'écran, au lieu d'annoncer une

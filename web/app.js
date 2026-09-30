@@ -15,7 +15,7 @@ import {
 } from "./writer.js";
 import { isSupported, renderVideo } from "./render.js";
 import { MOOD_NAMES } from "./audio.js";
-import { providerForKey, writeWithModel } from "./llm.js";
+import { writeWithFreeModel } from "./free-ai.js";
 import {
   DEFAULT_LOCAL_MODEL,
   LOCAL_MODELS,
@@ -168,15 +168,16 @@ const WRITER_HINTS = {
     "Un vrai modèle, téléchargé une fois puis gardé sur l'appareil. Aucune clé, aucun compte, et " +
     "rien ne sort du navigateur. ChatGPT et Gemini, eux, refusent toute requête sans clé : c'est " +
     "pourquoi le modèle tourne chez vous plutôt que chez eux.",
-  key:
-    "Un grand modèle en ligne, via une clé d'un palier gratuit. C'est la meilleure qualité, au " +
-    "prix d'une inscription chez le fournisseur.",
+  free:
+    "Un grand modèle interrogé en ligne, sans compte ni clé, et sans rien télécharger. En " +
+    "contrepartie votre consigne et les données du site partent chez un service tiers, dont ni " +
+    "la disponibilité ni les quotas ne sont garantis. En cas d'échec, le rédacteur intégré prend " +
+    "le relais.",
 };
 
 async function refreshWriterChoice() {
   const mode = writerChoice.value;
   $("#local-field").hidden = mode !== "local";
-  $("#key-field").hidden = mode !== "key";
   writerHint.textContent = WRITER_HINTS[mode] ?? "";
   if (mode !== "local") return;
 
@@ -203,12 +204,12 @@ try {
 }
 void refreshWriterChoice();
 
-// La clé reste sur l'appareil : elle n'est envoyée qu'au fournisseur choisi.
+// Une clé avait pu être enregistrée par une version précédente : on l'efface,
+// plus rien ici n'en demande.
 try {
-  const saved = localStorage.getItem("vido.key");
-  if (saved) $("#apikey").value = saved;
+  localStorage.removeItem("vido.key");
 } catch {
-  /* stockage indisponible : on s'en passe */
+  /* stockage indisponible : rien à nettoyer */
 }
 
 /* ------------------------------------------------------------------ *
@@ -753,14 +754,6 @@ form.addEventListener("submit", async (event) => {
     const requested = Number(data.get("count"));
     const wanted = Number.isFinite(requested) && requested > 0 ? requested : requestedCount(brief);
 
-    const apiKey = String(data.get("apikey") ?? "").trim();
-    try {
-      if (apiKey) localStorage.setItem("vido.key", apiKey);
-      else localStorage.removeItem("vido.key");
-    } catch {
-      /* stockage indisponible */
-    }
-
     const mode = String(data.get("writer") ?? "builtin");
     try {
       localStorage.setItem("vido.writer", mode);
@@ -799,15 +792,24 @@ form.addEventListener("submit", async (event) => {
       }
     }
 
-    if (!plan && mode === "key" && apiKey) {
-      const provider = providerForKey(apiKey);
+    // Service en ligne gratuit : rien à installer, mais la demande sort du
+    // navigateur, et rien ne garantit qu'il réponde.
+    if (!plan && mode === "free") {
       try {
-        say(`Écriture des scripts par ${provider.name}…`);
-        plan = await writeWithModel({ apiKey, site, brief, count: wanted, onProgress: say });
-        writtenBy = provider.name;
+        say("Écriture des scripts par une IA en ligne…");
+        plan = await writeWithFreeModel({
+          site,
+          brief,
+          count: wanted,
+          tour: visit.shots,
+          onProgress: (message) => say(`IA en ligne — ${message}`),
+        });
+        writtenBy = "IA en ligne gratuite";
       } catch (error) {
-        // Une clé refusée ou un quota atteint ne doit pas faire échouer la génération.
-        warn(`${error.message}\n\nLes scripts ont été écrits par le rédacteur intégré à la place.`);
+        warn(
+          `${error.message}\n\nLes scripts ont été écrits par le rédacteur intégré à la place. ` +
+            "L'IA sur votre appareil, dans le sélecteur, ne dépend d'aucun service extérieur.",
+        );
       }
     }
     if (!plan) plan = writeCampaign(site, brief, wanted);
