@@ -85,6 +85,16 @@ footer {
   margin-bottom: 22px;
 }
 
+/*
+ * `hidden` doit l'emporter. Toute classe qui fixe un `display` — et `.field` en
+ * pose un — bat la feuille de style du navigateur : le champ « Votre fichier
+ * audio » restait donc affiché alors qu'aucune musique n'était demandée, et les
+ * champs du rédacteur s'affichaient tous les deux à la fois.
+ */
+[hidden] {
+  display: none !important;
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -398,7 +408,7 @@ footer {
 }
 
 /* ------------------------------------------------------------------ *
- * Mémoire : les vidéos gardées d'une visite à l'autre
+ * Bibliothèque : les vidéos gardées, en liste
  * ------------------------------------------------------------------ */
 
 .library-head {
@@ -427,9 +437,114 @@ button.ghost:hover {
   color: var(--text);
 }
 
-.video-card .kept {
+.library-search {
+  margin: 14px 0 6px;
+}
+
+.library-search input {
+  width: 100%;
+}
+
+/* Un intitulé de période, comme dans une liste de conversations récentes. */
+.library-group {
   color: var(--muted);
   font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin: 18px 0 6px;
+  text-transform: uppercase;
+}
+
+.library-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.library-row {
+  align-items: center;
+  background: none;
+  border: 0;
+  border-radius: 12px;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  font-size: 15px;
+  font-weight: 500;
+  gap: 12px;
+  padding: 11px 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.library-row:hover,
+.library-row[aria-expanded="true"] {
+  background: var(--panel-2);
+}
+
+/* La vignette tient lieu d'icône : on reconnaît la vidéo avant de lire son titre. */
+.library-row .vignette {
+  background: #0b0f1a center / cover no-repeat;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  flex: 0 0 auto;
+  height: 44px;
+  width: 26px;
+}
+
+.library-row .label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.library-row .name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-row .meta {
+  color: var(--muted);
+  display: block;
+  font-size: 13px;
+  font-weight: 400;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-row .chevron {
+  color: var(--muted);
+  flex: 0 0 auto;
+  font-size: 18px;
+  transition: transform 0.18s;
+}
+
+.library-row[aria-expanded="true"] .chevron {
+  transform: rotate(90deg);
+}
+
+.library-detail {
+  border-left: 2px solid var(--line);
+  margin: 2px 0 10px 24px;
+  padding: 10px 0 4px 16px;
+}
+
+.library-detail video {
+  background: #000;
+  border-radius: 12px;
+  display: block;
+  max-height: 60vh;
+  width: 100%;
+}
+
+.library-detail .desc {
+  margin-top: 12px;
+}
+
+.library-detail .actions {
+  margin-top: 12px;
 }
 
 /* Reprise d'une génération interrompue : un état, pas une erreur. */

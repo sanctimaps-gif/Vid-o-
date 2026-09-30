@@ -264,12 +264,15 @@ if (!isSupported()) {
  * ------------------------------------------------------------------ */
 
 const library = $("#library");
-const libraryGrid = $("#library-grid");
+const libraryList = $("#library-list");
 const libraryNote = $("#library-note");
+const libraryFilter = $("#library-filter");
+const libraryEmpty = $("#library-empty");
 
 let jobId = null;
 let heartbeat = null;
 let releaseJob = () => {};
+let openEntry = null;
 
 /** Une vidéo de six cents kilooctets ne doit pas s'afficher « 0 Mo ». */
 function formatBytes(bytes) {
@@ -292,29 +295,33 @@ function formatDate(stamp) {
   }
 }
 
-/** Une vidéo de la mémoire, rejouable et téléchargeable comme au premier jour. */
-function libraryCard(entry) {
-  const card = document.createElement("article");
-  card.className = "video-card";
+/** Le jour d'une vidéo, dit comme on le dirait : « Aujourd'hui », « Hier ». */
+function periodOf(stamp) {
+  const day = 86_400_000;
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  if (stamp >= today) return "Aujourd'hui";
+  if (stamp >= today - day) return "Hier";
+  if (stamp >= today - 7 * day) return "7 derniers jours";
+  if (stamp >= today - 30 * day) return "30 derniers jours";
+  return "Plus ancien";
+}
+
+/**
+ * Le panneau qui s'ouvre sous une ligne : le lecteur, le texte à publier, et de
+ * quoi enregistrer ou retirer. Un seul ouvert à la fois, comme une liste de
+ * conversations : la bibliothèque reste lisible même avec vingt vidéos.
+ */
+function libraryDetail(entry, onChange) {
+  const panel = document.createElement("div");
+  panel.className = "library-detail";
 
   const player = document.createElement("video");
   player.src = URL.createObjectURL(entry.blob);
   player.poster = entry.thumbnail;
   player.controls = true;
   player.playsInline = true;
-  player.preload = "none";
-
-  const body = document.createElement("div");
-  body.className = "video-body";
-
-  const title = document.createElement("h3");
-  title.textContent = entry.title || entry.slug;
-
-  const kept = document.createElement("p");
-  kept.className = "kept";
-  kept.textContent =
-    `${entry.domain} — ${formatDate(entry.createdAt)} — ` +
-    `${Math.round(entry.durationSeconds)} s — ${formatBytes(entry.bytes)}`;
+  player.preload = "metadata";
 
   const description = document.createElement("pre");
   description.className = "desc";
@@ -331,19 +338,71 @@ function libraryCard(entry) {
   download.textContent = "Enregistrer la vidéo";
   download.className = "primary";
 
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.textContent = "Copier titre + description";
+  copy.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(`${entry.title}\n\n${description.textContent}`);
+      copy.textContent = "Copié";
+    } catch {
+      copy.textContent = "Copie refusée";
+    }
+    setTimeout(() => {
+      copy.textContent = "Copier titre + description";
+    }, 1800);
+  });
+
   const remove = document.createElement("button");
   remove.type = "button";
-  remove.textContent = "Retirer de la mémoire";
+  remove.textContent = "Retirer de la bibliothèque";
   remove.addEventListener("click", async () => {
     await forgetVideo(entry.id);
     URL.revokeObjectURL(player.src);
-    await refreshLibrary();
+    openEntry = null;
+    await onChange();
   });
 
-  actions.append(download, remove);
-  body.append(title, kept, description, actions);
-  card.append(player, body);
-  return card;
+  actions.append(download, copy, remove);
+  panel.append(player, description, actions);
+  return panel;
+}
+
+/** Une ligne de la bibliothèque : vignette, titre, et de quoi s'y retrouver. */
+function libraryRow(entry, onChange) {
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "library-row";
+  row.setAttribute("aria-expanded", String(openEntry === entry.id));
+
+  const vignette = document.createElement("span");
+  vignette.className = "vignette";
+  if (entry.thumbnail) vignette.style.backgroundImage = `url("${entry.thumbnail}")`;
+
+  const label = document.createElement("span");
+  label.className = "label";
+
+  const name = document.createElement("strong");
+  name.className = "name";
+  name.textContent = entry.title || entry.slug;
+
+  const meta = document.createElement("span");
+  meta.className = "meta";
+  meta.textContent = `${entry.domain} · ${Math.round(entry.durationSeconds)} s · ${formatDate(entry.createdAt)}`;
+
+  const chevron = document.createElement("span");
+  chevron.className = "chevron";
+  chevron.textContent = "›";
+
+  label.append(name, meta);
+  row.append(vignette, label, chevron);
+
+  row.addEventListener("click", async () => {
+    openEntry = openEntry === entry.id ? null : entry.id;
+    await onChange();
+  });
+
+  return row;
 }
 
 async function refreshLibrary() {
@@ -355,9 +414,37 @@ async function refreshLibrary() {
     return;
   }
 
-  libraryGrid.replaceChildren(...entries.map(libraryCard));
   library.hidden = entries.length === 0;
-  if (entries.length === 0) return;
+  if (entries.length === 0) {
+    libraryList.replaceChildren();
+    return;
+  }
+
+  const needle = libraryFilter.value.trim().toLowerCase();
+  const shown = needle
+    ? entries.filter((entry) =>
+        `${entry.title} ${entry.domain} ${entry.brief}`.toLowerCase().includes(needle),
+      )
+    : entries;
+
+  libraryEmpty.hidden = shown.length > 0;
+
+  // Regroupées par période, du plus récent au plus ancien.
+  const nodes = [];
+  let period = "";
+  for (const entry of shown) {
+    const current = periodOf(entry.createdAt);
+    if (current !== period) {
+      period = current;
+      const heading = document.createElement("p");
+      heading.className = "library-group";
+      heading.textContent = period;
+      nodes.push(heading);
+    }
+    nodes.push(libraryRow(entry, refreshLibrary));
+    if (openEntry === entry.id) nodes.push(libraryDetail(entry, refreshLibrary));
+  }
+  libraryList.replaceChildren(...nodes);
 
   const { bytes, quota } = await memoryUsage();
   libraryNote.textContent =
@@ -365,6 +452,8 @@ async function refreshLibrary() {
     `${quota ? ` sur ${formatBytes(quota)} disponibles` : ""}. ` +
     "Elles restent après un rechargement, et ne quittent jamais votre navigateur.";
 }
+
+libraryFilter.addEventListener("input", () => void refreshLibrary());
 
 /**
  * Au retour, une génération encore marquée « en cours » n'a pas survécu à la

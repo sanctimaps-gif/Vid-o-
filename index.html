@@ -177,11 +177,20 @@
 
       <section id="library" class="card" hidden>
         <div class="library-head">
-          <h2>Mémoire</h2>
+          <h2>Bibliothèque</h2>
           <button id="forget-all" type="button" class="ghost">Tout effacer</button>
         </div>
         <p class="hint" id="library-note"></p>
-        <div id="library-grid" class="grid"></div>
+        <div class="library-search">
+          <input
+            id="library-filter"
+            type="search"
+            placeholder="Rechercher une vidéo, un site…"
+            autocomplete="off"
+          />
+        </div>
+        <div id="library-list" class="library-list"></div>
+        <p class="hint" id="library-empty" hidden>Aucune vidéo ne correspond à cette recherche.</p>
       </section>
 
       <section class="card explain">
