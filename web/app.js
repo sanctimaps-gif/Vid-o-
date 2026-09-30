@@ -16,6 +16,15 @@ import {
 import { isSupported, renderVideo } from "./render.js";
 import { MOOD_NAMES } from "./audio.js";
 import { providerForKey, writeWithModel } from "./llm.js";
+import {
+  DEFAULT_LOCAL_MODEL,
+  LOCAL_MODELS,
+  localAiProblem,
+  localAiSupported,
+  localAiUnavailableReason,
+  localModelReady,
+  writeWithLocalModel,
+} from "./local-ai.js";
 import { keepScreenAwake, releaseScreen, screenIsAwake } from "./ticker.js";
 import {
   closeStaleJobs,
@@ -134,6 +143,65 @@ $("#photos").addEventListener("change", async (event) => {
       ? `${ownImages.length} image(s) ajoutée(s), elles illustreront les vidéos.`
       : "Aucune image exploitable dans cette sélection.";
 });
+
+/* ------------------------------------------------------------------ *
+ * Qui écrit les scripts
+ * ------------------------------------------------------------------ */
+
+const writerChoice = $("#writer");
+const writerHint = $("#writer-hint");
+const localModel = $("#localmodel");
+
+for (const model of LOCAL_MODELS) {
+  const option = document.createElement("option");
+  option.value = model.id;
+  option.textContent = `${model.name} — ${model.detail}`;
+  localModel.append(option);
+}
+localModel.value = DEFAULT_LOCAL_MODEL;
+
+const WRITER_HINTS = {
+  builtin:
+    "Le rédacteur intégré assemble des tournures préécrites : il suit le sujet et le nombre de " +
+    "vidéos, pas une consigne détaillée.",
+  local:
+    "Un vrai modèle, téléchargé une fois puis gardé sur l'appareil. Aucune clé, aucun compte, et " +
+    "rien ne sort du navigateur. ChatGPT et Gemini, eux, refusent toute requête sans clé : c'est " +
+    "pourquoi le modèle tourne chez vous plutôt que chez eux.",
+  key:
+    "Un grand modèle en ligne, via une clé d'un palier gratuit. C'est la meilleure qualité, au " +
+    "prix d'une inscription chez le fournisseur.",
+};
+
+async function refreshWriterChoice() {
+  const mode = writerChoice.value;
+  $("#local-field").hidden = mode !== "local";
+  $("#key-field").hidden = mode !== "key";
+  writerHint.textContent = WRITER_HINTS[mode] ?? "";
+  if (mode !== "local") return;
+
+  if (!localAiSupported()) {
+    writerHint.textContent = `IA sur l'appareil indisponible : ${localAiUnavailableReason()} Les scripts seront écrits par le rédacteur intégré.`;
+    return;
+  }
+  // Le vrai verdict demande d'interroger la carte graphique : on le dit ici,
+  // avant le lancement, plutôt qu'au milieu d'une génération.
+  const problem = await localAiProblem();
+  if (problem && writerChoice.value === "local") {
+    writerHint.textContent = `IA sur l'appareil indisponible : ${problem} Les scripts seront écrits par le rédacteur intégré.`;
+  }
+}
+
+writerChoice.addEventListener("change", () => void refreshWriterChoice());
+try {
+  const saved = localStorage.getItem("vido.writer");
+  if (saved && [...writerChoice.options].some((option) => option.value === saved)) {
+    writerChoice.value = saved;
+  }
+} catch {
+  /* stockage indisponible : on garde le choix par défaut */
+}
+void refreshWriterChoice();
 
 // La clé reste sur l'appareil : elle n'est envoyée qu'au fournisseur choisi.
 try {
@@ -604,9 +672,45 @@ form.addEventListener("submit", async (event) => {
       /* stockage indisponible */
     }
 
+    const mode = String(data.get("writer") ?? "builtin");
+    try {
+      localStorage.setItem("vido.writer", mode);
+    } catch {
+      /* stockage indisponible */
+    }
+
     let plan;
     let writtenBy = "rédacteur intégré";
-    if (apiKey) {
+
+    // L'IA sur l'appareil : aucune clé, aucun compte, et la visite déjà faite lui
+    // est décrite, pour qu'elle écrive en fonction de ce que la vidéo montrera.
+    if (mode === "local") {
+      const chosen = String(data.get("localmodel") ?? "");
+      try {
+        say(
+          localModelReady(chosen)
+            ? "Écriture des scripts par l'IA de votre appareil…"
+            : "Préparation du modèle sur votre appareil — le premier chargement est long…",
+        );
+        plan = await writeWithLocalModel({
+          site,
+          brief,
+          count: wanted,
+          tour: visit.shots,
+          model: chosen,
+          onProgress: (message) => say(`IA locale — ${message}`),
+        });
+        writtenBy = "IA locale";
+      } catch (error) {
+        warn(
+          `L'IA de votre appareil n'a pas pu écrire les scripts : ${error.message}\n\n` +
+            "Le rédacteur intégré a pris le relais. Une clé gratuite, plus bas, donne un meilleur " +
+            "résultat sans rien télécharger.",
+        );
+      }
+    }
+
+    if (!plan && mode === "key" && apiKey) {
       const provider = providerForKey(apiKey);
       try {
         say(`Écriture des scripts par ${provider.name}…`);

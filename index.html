@@ -104,6 +104,29 @@
         </div>
 
         <div class="field">
+          <label for="writer">Qui écrit les scripts</label>
+          <select id="writer" name="writer">
+            <option value="builtin">Rédacteur intégré — instantané, hors ligne</option>
+            <option value="local">IA sur votre appareil — sans compte ni clé</option>
+            <option value="key">Modèle en ligne — avec une clé gratuite</option>
+          </select>
+          <p class="hint" id="writer-hint">
+            Le rédacteur intégré assemble des tournures préécrites : il suit le sujet et le nombre
+            de vidéos, pas une consigne détaillée.
+          </p>
+        </div>
+
+        <div class="field" id="local-field" hidden>
+          <label for="localmodel">Modèle à faire tourner chez vous</label>
+          <select id="localmodel" name="localmodel"></select>
+          <p class="hint">
+            Le modèle est téléchargé une seule fois puis gardé sur l'appareil, et il travaille sur
+            votre processeur graphique. <strong>Rien ne sort du navigateur</strong> : ni votre
+            consigne, ni le contenu de votre site. Prévoyez le premier téléchargement en Wi-Fi.
+          </p>
+        </div>
+
+        <div class="field" id="key-field" hidden>
           <label for="apikey">Clé d'un modèle gratuit (facultatif)</label>
           <input
             id="apikey"
@@ -114,12 +137,10 @@
             placeholder="gsk_… ou AIza… — laissez vide pour le rédacteur intégré"
           />
           <p class="hint">
-            Sans clé, les scripts sont assemblés à partir de tournures préécrites : le sujet et le
-            nombre de vidéos suivent votre consigne, mais pas une demande détaillée. Avec une clé
-            d'un palier gratuit — <a href="https://console.groq.com/keys">Groq</a> ou
+            Une clé d'un palier gratuit — <a href="https://console.groq.com/keys">Groq</a> ou
             <a href="https://aistudio.google.com/apikey">Google AI Studio</a>, sans carte bancaire —
-            c'est un vrai modèle qui écrit et votre consigne est suivie à la lettre. La clé reste
-            dans ce navigateur.
+            fait écrire un grand modèle, et votre consigne est suivie à la lettre. La clé reste dans
+            ce navigateur et n'est envoyée qu'au fournisseur choisi.
           </p>
         </div>
 
@@ -205,7 +226,11 @@
             servent à choisir les produits ou les sections mises en avant. Les scripts sont ensuite
             composés à partir des seules données du site — aucun prix ni aucune caractéristique
             n'est inventé. Seul le texte destiné à être lu est retenu : ni le code de la page, ni
-            les menus, ni les pieds de page ne passent dans la voix off. Avec une clé de modèle gratuite, c'est un vrai modèle qui écrit et la
+            les menus, ni les pieds de page ne passent dans la voix off. Vous choisissez qui écrit :
+            le rédacteur intégré, une <strong>IA qui tourne sur votre appareil</strong> — sans clé
+            ni compte, rien ne sortant du navigateur — ou un grand modèle en ligne avec une clé
+            gratuite. Le modèle reçoit ce que la vidéo montrera : les pages filmées et les images
+            disponibles, pour que le texte parle de ce qui est réellement à l'écran. Avec une clé de modèle gratuite, c'est un vrai modèle qui écrit et la
             consigne est suivie dans le détail.
           </li>
           <li>

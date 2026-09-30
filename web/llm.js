@@ -49,7 +49,7 @@ export function providerForKey(key) {
   return PROVIDERS.find((provider) => provider.prefix?.test(clean)) ?? PROVIDERS[3];
 }
 
-const SYSTEM_PROMPT = `Tu es directeur de création spécialisé dans les vidéos verticales courtes (YouTube Shorts, TikTok, Reels).
+export const SYSTEM_PROMPT = `Tu es directeur de création spécialisé dans les vidéos verticales courtes (YouTube Shorts, TikTok, Reels).
 
 LA CONSIGNE DE L'UTILISATEUR EST LA RÈGLE PRINCIPALE. Elle décide du sujet de chaque vidéo, de leur nombre, de l'angle et du ton. Tout le reste ci-dessous n'est là que pour l'exécuter proprement.
 
@@ -68,7 +68,7 @@ LA CONSIGNE DE L'UTILISATEUR EST LA RÈGLE PRINCIPALE. Elle décide du sujet de 
 Réponds uniquement par un objet JSON de cette forme, sans texte autour :
 {"language":"fr","brandName":"","brandSummary":"","accentColor":"#RRGGBB","backgroundColor":"#RRGGBB","videos":[{"slug":"","concept":"","youtubeTitle":"","youtubeDescription":"","hashtags":[""],"tags":[""],"scenes":[{"narration":"","onScreenText":"","imageIndex":0,"role":"hook"}]}]}`;
 
-function describeSite(site) {
+export function describeSite(site) {
   const lines = [`URL : ${site.url}`, `Nom : ${site.siteName}`, `Titre : ${site.title}`];
   if (site.description) lines.push(`Description : ${site.description}`);
   // Ce que le rédacteur ne devinerait pas du texte : l'essentiel du site est à
@@ -130,7 +130,7 @@ function describeSite(site) {
 }
 
 /** Les modèles ouverts encadrent souvent leur JSON de texte : on va le rechercher. */
-function extractJson(raw) {
+export function extractJson(raw) {
   const candidates = [];
   const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(raw);
   if (fenced?.[1]) candidates.push(fenced[1]);
@@ -150,7 +150,7 @@ function extractJson(raw) {
 }
 
 /** Remet la réponse du modèle dans les rails : rien de ce qui suit ne doit casser le rendu. */
-function coercePlan(raw, site, count) {
+export function coercePlan(raw, site, count) {
   const usable = new Set(site.images.filter((image) => image.bitmap).map((image) => image.index));
   const hex = /^#[0-9a-fA-F]{6}$/;
   const text = (value, fallback = "") => (typeof value === "string" ? value.trim() : fallback);
