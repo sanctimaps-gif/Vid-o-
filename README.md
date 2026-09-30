@@ -211,6 +211,27 @@ Pour voir ce qui est utilisable chez vous :
 npm run doctor
 ```
 
+## Quand vous posez le téléphone
+
+Le montage se fait en temps réel : cinq vidéos de vingt-cinq secondes demandent deux minutes
+pendant lesquelles la page doit rester vivante. Or un appareil met en veille une page silencieuse
+au bout de quelques minutes sans qu'on la touche — c'est ce qui interrompait les générations.
+
+Trois choses s'y opposent maintenant :
+
+- **Vid-O joue un son inaudible** pendant toute la génération. Une page qui produit du son est
+  traitée comme un lecteur de musique et reste vivante ; une page muette est suspendue. Ce son ne
+  va qu'aux haut-parleurs, jamais dans vos vidéos.
+- **Le son s'ouvre au moment où vous appuyez sur le bouton**, dans votre geste. Un téléphone
+  refuse de démarrer l'audio en dehors d'une action de l'utilisateur, et plus loin dans la
+  génération il serait trop tard.
+- **L'écran est maintenu allumé** quand le navigateur le permet. Quand il ne le permet pas, Vid-O
+  le dit et conseille de désactiver le verrouillage automatique le temps de la génération.
+
+Si malgré tout l'appareil suspend la page, Vid-O le détecte — un saut de plusieurs secondes entre
+deux images — et **refait la vidéo concernée** plutôt que de vous livrer un fichier muet par
+endroits. Le relevé de génération compte ces reprises.
+
 ## La mémoire
 
 Sur la page navigateur, chaque vidéo est écrite dans le stockage hors ligne du navigateur

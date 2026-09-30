@@ -620,6 +620,14 @@ function buildAudio(audioContext, destination, scenes, music, startAt, totalDura
   }
 }
 
+/** Le montage a été interrompu par la mise en veille : la vidéo est à refaire. */
+export class RenderStalled extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "RenderStalled";
+  }
+}
+
 /**
  * Fabrique une vidéo et renvoie le fichier, la miniature et sa durée.
  */
@@ -737,13 +745,34 @@ export async function renderVideo({
   let thumbnail = null;
   const ticker = createTicker(1000 / 30);
 
+  // Un écart entre deux images bien plus long que leur intervalle signifie que la
+  // page a été suspendue — écran verrouillé, téléphone posé. Le son, lui, n'a pas
+  // été enregistré pendant ce temps : la vidéo serait muette par endroits et
+  // désynchronisée. Mieux vaut le reconnaître et la refaire.
+  const STALL_MS = 3000;
+  let stalled = 0;
+
   await new Promise((resolve) => {
     let done = false;
+    let previous = performance.now();
+
     const step = () => {
       if (done) return;
+      const now = performance.now();
+      const gap = now - previous;
+      previous = now;
+
+      if (gap > STALL_MS && !done) {
+        stalled = Math.round(gap);
+        done = true;
+        ticker.stop();
+        resolve();
+        return;
+      }
+
       // L'image dessinée suit l'horloge réelle, celle que suit aussi le son : une
       // interruption coûte des images, jamais le synchronisme avec la voix.
-      const elapsed = Math.max(0, (performance.now() - startedAt) / 1000);
+      const elapsed = Math.max(0, (now - startedAt) / 1000);
       drawFrame(ctx, drawContext, Math.min(elapsed, totalDuration));
       if (manual) videoTrack.requestFrame();
 
@@ -762,6 +791,14 @@ export async function renderVideo({
   recorder.stop();
   await finished;
   for (const track of stream.getTracks()) track.stop();
+
+  if (stalled) {
+    for (const track of stream.getTracks()) track.stop();
+    throw new RenderStalled(
+      `le montage a été interrompu pendant ${(stalled / 1000).toFixed(0)} s : ` +
+        "la page a été mise en veille par l'appareil",
+    );
+  }
 
   const blob = new Blob(parts, { type: mimeType });
   return {

@@ -13,7 +13,7 @@ import {
   rankSubjects,
   attachSubjectPages,
 } from "./writer.js";
-import { isSupported, renderVideo } from "./render.js";
+import { RenderStalled, isSupported, renderVideo } from "./render.js";
 import { MOOD_NAMES } from "./audio.js";
 import { writeWithFreeModel } from "./free-ai.js";
 import {
@@ -25,7 +25,13 @@ import {
   localModelReady,
   writeWithLocalModel,
 } from "./local-ai.js";
-import { keepScreenAwake, releaseScreen, screenIsAwake } from "./ticker.js";
+import {
+  keepAudioAwake,
+  keepScreenAwake,
+  releaseScreen,
+  screenIsAwake,
+  watchAudioContext,
+} from "./ticker.js";
 import {
   closeStaleJobs,
   forgetEverything,
@@ -615,10 +621,22 @@ form.addEventListener("submit", async (event) => {
     const seconds = Math.round((performance.now() - startedAt) / 1000);
     $("#elapsed").textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
   }, 1000);
+  // Le son doit s'ouvrir ici, dans le geste qui a lancé la génération : un
+  // téléphone refuse de démarrer l'audio en dehors d'une action de l'utilisateur,
+  // et plus loin dans la fonction le lien avec le clic est rompu. C'est aussi ce
+  // son, maintenu pendant toute la génération, qui empêche l'appareil de mettre
+  // la page en veille — une page silencieuse est suspendue au bout de quelques
+  // minutes sans qu'on la touche, et le montage s'arrête net.
+  const audioContext = new (window.AudioContext ?? window.webkitAudioContext)();
+  const silence = keepAudioAwake(audioContext);
+  const unwatchAudio = watchAudioContext(audioContext);
+  void audioContext.resume().catch(() => {});
+
   const awake = await keepScreenAwake();
   $("#stage-hint").textContent = awake
-    ? "L'écran reste allumé jusqu'à la fin. Vous pouvez poser le téléphone, ou changer d'application : le montage continue."
-    : "Le montage continue même si vous changez d'onglet. Évitez simplement de fermer la page.";
+    ? "L'écran reste allumé jusqu'à la fin. Vous pouvez poser le téléphone : le montage continue."
+    : "Ce navigateur ne sait pas garder l'écran allumé. Si votre appareil se verrouille tout seul, " +
+      "le montage peut s'interrompre : désactivez le verrouillage automatique le temps de la génération.";
   notice.hidden = true;
   panel.hidden = false;
   results.hidden = true;
@@ -831,14 +849,14 @@ form.addEventListener("submit", async (event) => {
     const via = preferredSource();
     say(`${plan.videos.length} vidéo(s) à monter pour ${plan.brandName}${via ? ` (lu via ${via})` : ""}.`);
 
-    const audioContext = new (window.AudioContext ?? window.webkitAudioContext)();
-    if (audioContext.state === "suspended") await audioContext.resume();
+    if (audioContext.state === "suspended") await audioContext.resume().catch(() => {});
 
     const chosenMood = String(data.get("mood") ?? "none");
     const mood = MOOD_NAMES.includes(chosenMood) ? chosenMood : null;
     const withVoice = data.get("voice") !== "off";
 
     let voiceFailed = false;
+    let stalls = 0;
     stageArea.hidden = false;
     jobId = await startJob({ url, brief, total: plan.videos.length }).catch(() => null);
     // Signe de vie régulier : c'est lui qui distingue une génération en cours
@@ -859,26 +877,42 @@ form.addEventListener("submit", async (event) => {
         await visit.waitFor(video.pageUrl, 12000);
       }
 
-      const file = await renderVideo({
-        video,
-        plan,
-        site,
-        canvas,
-        position,
-        total: plan.videos.length,
-        audioContext,
-        withVoice,
-        mood,
-        musicBuffer: chosenMood === "file" ? musicBuffer : null,
-        // Les pages photographiées depuis le début de la visite : chaque vidéo montée
-        // profite de celles qui sont arrivées entre-temps.
-        tour: visit.shots,
-        onStage: (step) => say(`Vidéo ${position}/${plan.videos.length} — ${step}`),
-        onProgress: (ratio) => {
-          const overall = (index + ratio) / plan.videos.length;
-          bar.style.width = `${Math.round(overall * 100)}%`;
-        },
-      });
+      // Le montage se fait en temps réel : si l'appareil met la page en veille au
+      // milieu, le son n'est pas enregistré pendant ce temps et la vidéo serait
+      // muette par endroits. On la refait plutôt que de la livrer abîmée.
+      let file = null;
+      for (let essai = 1; essai <= 3 && !file; essai += 1) {
+        try {
+          file = await renderVideo({
+            video,
+            plan,
+            site,
+            canvas,
+            position,
+            total: plan.videos.length,
+            audioContext,
+            withVoice,
+            mood,
+            musicBuffer: chosenMood === "file" ? musicBuffer : null,
+            // Les pages photographiées depuis le début de la visite : chaque vidéo montée
+            // profite de celles qui sont arrivées entre-temps.
+            tour: visit.shots,
+            onStage: (step) => say(`Vidéo ${position}/${plan.videos.length} — ${step}`),
+            onProgress: (ratio) => {
+              const overall = (index + ratio) / plan.videos.length;
+              bar.style.width = `${Math.round(overall * 100)}%`;
+            },
+          });
+        } catch (error) {
+          if (!(error instanceof RenderStalled) || essai === 3) throw error;
+          say(`Vidéo ${position}/${plan.videos.length} — reprise après la mise en veille…`);
+          await updateJob(jobId, { stage: `vidéo ${position} reprise` });
+          if (audioContext.state === "suspended") await audioContext.resume().catch(() => {});
+          // Le temps que l'appareil se remette vraiment.
+          await new Promise((resolve) => setTimeout(resolve, 1200));
+          stalls += 1;
+        }
+      }
       addResult(video, file, position);
 
       // Écrite tout de suite, pas à la fin du lot : une interruption au montage de
@@ -925,8 +959,6 @@ form.addEventListener("submit", async (event) => {
           "utilisez la version ordinateur, qui synthétise la voix sur votre machine.",
       );
     }
-    await audioContext.close();
-
     bar.style.width = "100%";
     showReport(
       site,
@@ -944,6 +976,7 @@ form.addEventListener("submit", async (event) => {
             : "aucune page photographiée"
         }`,
         site.interactive ? `chargement attendu : ${site.interactive}` : "page statique, capture immédiate",
+        stalls > 0 ? `mises en veille rattrapées : ${stalls}` : "aucune mise en veille",
       ].join("\n"),
     );
     stageArea.hidden = true;
@@ -960,6 +993,9 @@ form.addEventListener("submit", async (event) => {
   } finally {
     clearInterval(elapsedTimer);
     clearInterval(heartbeat);
+    silence();
+    unwatchAudio();
+    await audioContext.close().catch(() => {});
     releaseJob();
     releaseJob = () => {};
     submit.disabled = false;
