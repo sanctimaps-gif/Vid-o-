@@ -14,6 +14,7 @@ import {
   attachSubjectPages,
 } from "./writer.js";
 import { RenderStalled, isSupported, renderVideo } from "./render.js";
+import { pickFastCodec, renderVideoFast } from "./fast-render.js";
 import { MOOD_NAMES } from "./audio.js";
 import { writeWithFreeModel } from "./free-ai.js";
 import {
@@ -857,6 +858,13 @@ form.addEventListener("submit", async (event) => {
 
     let voiceFailed = false;
     let stalls = 0;
+
+    // Encodage hors ligne quand le navigateur le sait : une vidéo de vingt-cinq
+    // secondes se fabrique alors en quelques secondes au lieu de vingt-cinq, et
+    // ce qui est court ne risque plus d'être interrompu par la mise en veille.
+    const fastCodec = await pickFastCodec(canvas.width, canvas.height);
+    stage("moteur de montage", fastCodec ? `hors ligne (${fastCodec})` : "temps réel");
+
     stageArea.hidden = false;
     jobId = await startJob({ url, brief, total: plan.videos.length }).catch(() => null);
     // Signe de vie régulier : c'est lui qui distingue une génération en cours
@@ -883,7 +891,7 @@ form.addEventListener("submit", async (event) => {
       let file = null;
       for (let essai = 1; essai <= 3 && !file; essai += 1) {
         try {
-          file = await renderVideo({
+          const reglages = {
             video,
             plan,
             site,
@@ -902,7 +910,10 @@ form.addEventListener("submit", async (event) => {
               const overall = (index + ratio) / plan.videos.length;
               bar.style.width = `${Math.round(overall * 100)}%`;
             },
-          });
+          };
+          file = fastCodec
+            ? await renderVideoFast({ ...reglages, codec: fastCodec })
+            : await renderVideo(reglages);
         } catch (error) {
           if (!(error instanceof RenderStalled) || essai === 3) throw error;
           say(`Vidéo ${position}/${plan.videos.length} — reprise après la mise en veille…`);
@@ -976,6 +987,7 @@ form.addEventListener("submit", async (event) => {
             : "aucune page photographiée"
         }`,
         site.interactive ? `chargement attendu : ${site.interactive}` : "page statique, capture immédiate",
+        `montage : ${fastCodec ? "hors ligne, sans attendre" : "en temps réel"}`,
         stalls > 0 ? `mises en veille rattrapées : ${stalls}` : "aucune mise en veille",
       ].join("\n"),
     );

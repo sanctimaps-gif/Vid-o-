@@ -394,6 +394,39 @@ function drawSitePage(ctx, shot, site, plan, progress, W, H, range = [0, 1]) {
   ctx.fillText(address, barX + 60 * scale, barY + barH / 2);
 }
 
+/**
+ * Fond flouté d'un visuel, calculé une fois pour toutes.
+ *
+ * Le flou était appliqué à chaque image : c'est de loin l'opération la plus chère
+ * du rendu, et elle refaisait soixante fois par seconde un résultat identique.
+ * Elle est calculée une fois, sur une image réduite — flouter petit puis agrandir
+ * donne le même effet pour une fraction du coût — et gardée le temps de la série.
+ */
+const blurred = new WeakMap();
+
+function blurredBackdrop(bitmap) {
+  const cached = blurred.get(bitmap);
+  if (cached) return cached;
+
+  // 160 pixels de large suffisent : le flou efface de toute façon le détail.
+  const width = 160;
+  const height = Math.max(1, Math.round((bitmap.height / bitmap.width) * width));
+  const surface = document.createElement("canvas");
+  surface.width = width;
+  surface.height = height;
+
+  const ctx = surface.getContext("2d");
+  if (ctx.filter !== undefined) ctx.filter = "blur(7px) brightness(0.55) saturate(1.2)";
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  if (ctx.filter === undefined) {
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    ctx.fillRect(0, 0, width, height);
+  }
+
+  blurred.set(bitmap, surface);
+  return surface;
+}
+
 function drawPhoto(ctx, bitmap, zoom, W, H) {
   const { width: iw, height: ih } = bitmap;
 
@@ -402,15 +435,15 @@ function drawPhoto(ctx, bitmap, zoom, W, H) {
   ctx.scale(zoom, zoom);
   ctx.translate(-W / 2, -H / 2);
 
-  const cover = Math.max(W / iw, H / ih);
-  ctx.save();
-  if (ctx.filter !== undefined) ctx.filter = "blur(48px) brightness(0.55) saturate(1.2)";
-  ctx.drawImage(bitmap, (W - iw * cover) / 2, (H - ih * cover) / 2, iw * cover, ih * cover);
-  ctx.restore();
-  if (ctx.filter === undefined) {
-    ctx.fillStyle = "rgba(0,0,0,0.45)";
-    ctx.fillRect(0, 0, W, H);
-  }
+  const backdrop = blurredBackdrop(bitmap);
+  const cover = Math.max(W / backdrop.width, H / backdrop.height);
+  ctx.drawImage(
+    backdrop,
+    (W - backdrop.width * cover) / 2,
+    (H - backdrop.height * cover) / 2,
+    backdrop.width * cover,
+    backdrop.height * cover,
+  );
 
   const contain = Math.min((W * 0.94) / iw, (H * 0.66) / ih);
   ctx.drawImage(
@@ -577,8 +610,10 @@ export function drawFrame(ctx, context, elapsed) {
  * ------------------------------------------------------------------ */
 
 /** Construit la piste sonore : voix aux bons instants, musique atténuée dessous. */
-function buildAudio(audioContext, destination, scenes, music, startAt, totalDuration) {
-  const monitor = audioContext.destination;
+export function buildAudio(audioContext, destination, scenes, music, startAt, totalDuration, monitored = true) {
+  // Hors ligne, il n'y a pas de haut-parleur à alimenter : la sortie du contexte
+  // *est* le fichier, et y brancher deux fois doublerait le niveau.
+  const monitor = monitored ? audioContext.destination : null;
 
   if (music) {
     const source = audioContext.createBufferSource();
@@ -601,7 +636,7 @@ function buildAudio(audioContext, destination, scenes, music, startAt, totalDura
 
     source.connect(gain);
     gain.connect(destination);
-    gain.connect(monitor);
+    if (monitor) gain.connect(monitor);
     source.start(startAt);
     source.stop(startAt + totalDuration + 0.4);
   }
@@ -615,8 +650,48 @@ function buildAudio(audioContext, destination, scenes, music, startAt, totalDura
     gain.gain.value = 1.15;
     source.connect(gain);
     gain.connect(destination);
-    gain.connect(monitor);
+    if (monitor) gain.connect(monitor);
     source.start(startAt + scene.start + PAD_START);
+  }
+}
+
+/**
+ * Attribue à chaque plan la page du site qu'il montrera, et la portion qu'il en
+ * parcourt. Partagé par les deux moteurs de rendu, pour qu'une vidéo soit cadrée
+ * de la même façon qu'elle soit montée en temps réel ou encodée hors ligne.
+ */
+export function assignShots(scenes, tour, video, position) {
+  // La visite est figée ici pour toute la vidéo : elle continue de se remplir en
+  // arrière-plan, et une page qui arrive au milieu d'un plan le ferait sauter.
+  // Chaque plan « site » montre une page différente, pour qu'on avance vraiment
+  // dans le site au lieu de revoir l'accueil trois fois.
+  const pages = tour.filter((shot) => shot?.bitmap);
+
+  // La page du sujet présenté passe en premier : une vidéo sur saint Michel doit
+  // ouvrir sur la page de saint Michel, son adresse affichée, et non sur l'accueil.
+  // Une vidéo qui présente un sujet reste sur la page de ce sujet du début à la
+  // fin : passer à la page d'un autre saint au milieu contredirait ce qui est dit.
+  // Seules les vidéos sur le site entier parcourent les pages l'une après l'autre.
+  const own = video.pageUrl ? pages.find((shot) => shot.url === video.pageUrl) : null;
+
+  let shown = 0;
+  for (const scene of scenes) {
+    const showsSite = scene.role !== "body" || !scene.bitmap;
+    // Une scène montre une page soit parce qu'elle en illustre une, soit parce
+    // qu'elle n'a rien d'autre à montrer. Quand la vidéo a sa page à elle, c'est
+    // toujours celle-là : la page attribuée à l'écriture peut dater d'un moment
+    // où la visite n'avait encore photographié que l'accueil.
+    const wantsPage = Boolean(scene.pageShot) || showsSite;
+    const fallback = pages.length > 0 ? pages[(position - 1 + shown) % pages.length] : null;
+    scene.shot = wantsPage ? (own ?? scene.pageShot ?? fallback) : null;
+
+    if (scene.shot) {
+      // Chaque plan parcourt une autre portion de la page. Sur un site qui n'a que
+      // ses pages à montrer, c'est ce qui évite de revoir trois fois le même écran.
+      const from = ((shown % 3) * 0.28) % 1;
+      scene.shotRange = [from, Math.min(1, from + 0.5)];
+      shown += 1;
+    }
   }
 }
 
@@ -673,38 +748,7 @@ export async function renderVideo({
 
   const hero = site.images.find((image) => image.bitmap)?.bitmap ?? null;
 
-  // La visite est figée ici pour toute la vidéo : elle continue de se remplir en
-  // arrière-plan, et une page qui arrive au milieu d'un plan le ferait sauter.
-  // Chaque plan « site » montre une page différente, pour qu'on avance vraiment
-  // dans le site au lieu de revoir l'accueil trois fois.
-  const pages = tour.filter((shot) => shot?.bitmap);
-
-  // La page du sujet présenté passe en premier : une vidéo sur saint Michel doit
-  // ouvrir sur la page de saint Michel, son adresse affichée, et non sur l'accueil.
-  // Une vidéo qui présente un sujet reste sur la page de ce sujet du début à la
-  // fin : passer à la page d'un autre saint au milieu contredirait ce qui est dit.
-  // Seules les vidéos sur le site entier parcourent les pages l'une après l'autre.
-  const own = video.pageUrl ? pages.find((shot) => shot.url === video.pageUrl) : null;
-
-  let shown = 0;
-  for (const scene of scenes) {
-    const showsSite = scene.role !== "body" || !scene.bitmap;
-    // Une scène montre une page soit parce qu'elle en illustre une, soit parce
-    // qu'elle n'a rien d'autre à montrer. Quand la vidéo a sa page à elle, c'est
-    // toujours celle-là : la page attribuée à l'écriture peut dater d'un moment
-    // où la visite n'avait encore photographié que l'accueil.
-    const wantsPage = Boolean(scene.pageShot) || showsSite;
-    const fallback = pages.length > 0 ? pages[(position - 1 + shown) % pages.length] : null;
-    scene.shot = wantsPage ? (own ?? scene.pageShot ?? fallback) : null;
-
-    if (scene.shot) {
-      // Chaque plan parcourt une autre portion de la page. Sur un site qui n'a que
-      // ses pages à montrer, c'est ce qui évite de revoir trois fois le même écran.
-      const from = ((shown % 3) * 0.28) % 1;
-      scene.shotRange = [from, Math.min(1, from + 0.5)];
-      shown += 1;
-    }
-  }
+  assignShots(scenes, tour, video, position);
 
   // Avec `captureStream(0)`, aucune image n'est prélevée automatiquement : c'est nous
   // qui poussons chaque image dessinée. Le montage ne dépend donc plus de l'affichage

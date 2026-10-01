@@ -232,6 +232,21 @@ Si malgré tout l'appareil suspend la page, Vid-O le détecte — un saut de plu
 deux images — et **refait la vidéo concernée** plutôt que de vous livrer un fichier muet par
 endroits. Le relevé de génération compte ces reprises.
 
+### Le montage hors ligne
+
+Quand le navigateur sait encoder sans jouer (WebCodecs), Vid-O ne monte plus en temps réel : les
+images sont dessinées et compressées les unes après les autres, le son est calculé d'un bloc, et
+le fichier est assemblé. Mesuré sur deux vidéos totalisant 42 secondes : **46 s en temps réel,
+23 s hors ligne**. Et surtout, plus rien ne dépend de l'horloge — une mise en veille au milieu
+interrompt le travail sans l'abîmer, là où un enregistrement en direct perdait le son.
+
+Le relevé indique lequel des deux moteurs a travaillé. Le choix est automatique : sans WebCodecs,
+ou sans format commun, Vid-O revient au temps réel et le résultat est le même.
+
+**Sur iPhone, ce sera probablement le temps réel.** Safari encode en H.264, que le conteneur WebM
+ne transporte pas ; il faudrait écrire un conteneur MP4 pour que le montage hors ligne serve aussi
+là-bas. Les protections ci-dessus restent donc votre filet sur mobile.
+
 ## La mémoire
 
 Sur la page navigateur, chaque vidéo est écrite dans le stockage hors ligne du navigateur
